@@ -11,6 +11,10 @@ class AutoDifferentiableValue(ABC):
     @abstractmethod
     def clear_gradients(self):
         raise NotImplementedError()
+    
+    @abstractmethod
+    def calculate_value(self) -> np.ndarray:
+        raise NotImplementedError()
 
     def calculate_backward_gradients(self, _upstream: np.ndarray | None = None) -> np.ndarray:
         if _upstream == None:
@@ -33,6 +37,9 @@ class ADVMatrix(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
     
+    def calculate_value(self) -> np.ndarray:
+        return self.value
+    
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
@@ -49,6 +56,13 @@ class ADVMatMul(AutoDifferentiableValue):
         self.gradient = None
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs @ rhs
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -68,6 +82,13 @@ class ADVMatAdd(AutoDifferentiableValue):
         self.gradient = None
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
+
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs + rhs
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -88,6 +109,13 @@ class ADVMatSub(AutoDifferentiableValue):
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
     
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs - rhs
+        
+        return self.value
+    
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
         self.lhs.calculate_backward_gradients(_upstream)
@@ -106,6 +134,13 @@ class ADVMatElMul(AutoDifferentiableValue):
         self.gradient = None
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
+
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs * rhs
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -125,6 +160,13 @@ class ADVMatElDiv(AutoDifferentiableValue):
         self.gradient = None
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
+
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs / rhs
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -144,6 +186,13 @@ class ADVMatElPow(AutoDifferentiableValue):
         self.gradient = None
         self.lhs.clear_gradients()
         self.rhs.clear_gradients()
+
+    def calculate_value(self) -> np.ndarray:
+        lhs = self.lhs.calculate_value()
+        rhs = self.rhs.calculate_value()
+        self.value = lhs ** rhs
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -161,6 +210,12 @@ class ADVMatTrans(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.opr.clear_gradients()
+
+    def calculate_value(self) -> np.ndarray:
+        opr = self.opr.calculate_value()
+        self.value = opr.T
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -173,11 +228,19 @@ class ADVBroadcastTo(AutoDifferentiableValue):
     def __init__(self, source: AutoDifferentiableValue, target_shape: tuple):
         self.source = source
         self.original_shape = source.value.shape
+        self.target_shape = target_shape
         super().__init__(np.broadcast_to(source.value, target_shape))
     
     def clear_gradients(self):
         self.gradient = None
         self.source.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        source = self.source.calculate_value()
+        self.original_shape = source.shape
+        self.value = np.broadcast_to(source, self.target_shape)
+        
+        return self.value
 
     def calculate_backward_gradients(self, _upstream = None):
             _upstream = super().calculate_backward_gradients(_upstream)
@@ -206,6 +269,12 @@ class ADVReLU(AutoDifferentiableValue):
         self.gradient = None
         self.inputs.clear_gradients()
     
+    def calculate_value(self) -> np.ndarray:
+        inputs = self.inputs.calculate_value()
+        self.value = np.maximum(inputs, 0)
+        
+        return self.value
+    
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
         self.inputs.calculate_backward_gradients(_upstream * (self.inputs.value > 0).astype(float))
@@ -221,6 +290,12 @@ class ADVSigmoid(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.inputs.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        inputs = self.inputs.calculate_value()
+        self.value = 1 / (1 + np.exp(-inputs))
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -241,6 +316,14 @@ class ADVTanh(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.inputs.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        inputs = self.inputs.calculate_value()
+        self._pos = np.exp(inputs)
+        self._neg = np.exp(-inputs)
+        self.value = (self._pos - self._neg) / (self._pos + self._neg)
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -263,6 +346,17 @@ class ADVSoftmax(AutoDifferentiableValue):
         self.gradient = None
         self.logits.clear_gradients()
     
+    def calculate_value(self) -> np.ndarray:
+        logits = self.logits.calculate_value()
+
+        shifted_logits = logits - np.max(logits, axis=1, keepdims=True)
+        exps = np.exp(shifted_logits)
+        probabilities = exps / np.sum(exps, axis=1, keepdims=True)
+
+        self.value = probabilities
+        
+        return self.value
+    
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
         
@@ -283,6 +377,11 @@ class ADVMeanSquaredError(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.predictions.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        predictions = self.predictions.calculate_value()
+        self.value = np.mean((self.targets - predictions) ** 2)
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -310,6 +409,17 @@ class ADVBinaryCrossEntropy(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.predictions.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        predictions = self.predictions.calculate_value()
+
+        safe_preds = np.clip(predictions.value, self.epsilon, 1.0 - self.epsilon)
+        pos_error = self.targets * np.log(safe_preds)
+        neg_error = (1 - self.targets) * np.log(1 - safe_preds)
+
+        self.value = -np.mean(pos_error + neg_error)
+
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
@@ -339,6 +449,16 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
     def clear_gradients(self):
         self.gradient = None
         self.predictions.clear_gradients()
+    
+    def calculate_value(self) -> np.ndarray:
+        predictions = self.predictions.calculate_value()
+
+        safe_preds = np.clip(predictions.value, self.epsilon, 1.0 - self.epsilon)
+        batch_losses = -np.sum(self.targets * np.log(safe_preds), axis=1)
+
+        self.value = np.mean(batch_losses)
+        
+        return self.value
     
     def calculate_backward_gradients(self, _upstream = None):          
         _upstream = super().calculate_backward_gradients(_upstream)
