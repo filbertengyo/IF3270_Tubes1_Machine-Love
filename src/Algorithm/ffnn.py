@@ -129,8 +129,13 @@ class FFNN:
             # If the labels are not one hot encoded, we need to keep track of the labels
             self._labels = np.unique(y)
             self._label_count = len(self._labels)
+
+            y_ohe = np.zeros((len(y), self._label_count))
+            for i in range(self._label_count):
+                y_ohe[:,i] = (y == self._labels[i]).astype(float)
         else:
             self._label_count = y.shape[1]
+            y_ohe = y
         
         # Find input layer size
         self._feature_count = X.shape[1]
@@ -229,7 +234,7 @@ class FFNN:
         # Scramble the training data
         needed_samples = self._batch_size * self._epochs
 
-        training_data = np.concatenate(X, y, axis=1)
+        training_data = np.concatenate(X, y_ohe, axis=1)
         training_order = rng.permutation(training_data)
 
         while training_order.shape[0] < needed_samples:
@@ -239,7 +244,8 @@ class FFNN:
 
         # Train on every batch
         for batch in training_order:
-            self._in_matrix.value = batch
+            self._in_matrix.value = batch[:, :-self._label_count]
+            self._loss.targets = batch[:, -self._label_count:]
             self._loss.calculate_value()
             self._loss.calculate_backward_gradients()
 
@@ -248,7 +254,7 @@ class FFNN:
                 b.value = bo.optimize(b.gradient)
                 
     
-    def predict(self, X):
+    def predict(self, X: np.ndarray):
         '''
         Predict class labels for samples in X
 
@@ -258,4 +264,21 @@ class FFNN:
         Returns:
             y_pred (ndarray): prediction results
         '''
-    
+
+        sample_size = X.shape[0]
+
+        layer_sizes = (self._hidden_layer_sizes or [])
+        layer_sizes.append(self._label_count)
+
+        for B, sz in zip(self._bias_broadcasts, layer_sizes):
+            B.target_shape = (sz, sample_size)
+        
+        self._in_matrix.value = X
+        y_pred_ohe = self._out_matrix.calculate_value()
+
+        if self._one_hot_encoded:
+            y_pred = y_pred_ohe
+        else:
+            y_pred = self._labels[y_pred_ohe.argmax(axis=1)]
+        
+        return y_pred
