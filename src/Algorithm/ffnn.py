@@ -129,10 +129,7 @@ class FFNN:
             # If the labels are not one hot encoded, we need to keep track of the labels
             self._labels = np.unique(y)
             self._label_count = len(self._labels)
-
-            y_ohe = np.zeros((len(y), self._label_count))
-            for i in range(self._label_count):
-                y_ohe[:,i] = (y == self._labels[i]).astype(float)
+            y_ohe = (y[:, None] == self._labels).astype(float)
         else:
             self._label_count = y.shape[1]
             y_ohe = y
