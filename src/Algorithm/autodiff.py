@@ -31,7 +31,7 @@ class AutoDifferentiableValue(ABC):
 class ADVMatrix(AutoDifferentiableValue):
     '''Auto Differentiable Atomic Matrix'''
 
-    def __init__(self, value: np.ndarray | None):
+    def __init__(self, value: np.ndarray | None = None):
         super().__init__()
         self.value = value
     
@@ -296,7 +296,7 @@ class ADVMatTrans(AutoDifferentiableValue):
 class ADVBroadcastTo(AutoDifferentiableValue):
     '''Explicit node to broadcast an array to a target shape'''
 
-    def __init__(self, source: AutoDifferentiableValue, target_shape: tuple | None):
+    def __init__(self, source: AutoDifferentiableValue, target_shape: tuple | None = None):
         super().__init__()
         self.source = source
         self.original_shape = None
@@ -483,7 +483,7 @@ class ADVSoftmax(AutoDifferentiableValue):
 class ADVMeanSquaredError(AutoDifferentiableValue):
     '''Auto Differentiable MSE Node'''
 
-    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None):
+    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None = None):
         super().__init__()
         self.predictions = predictions
         self.targets = targets
@@ -519,7 +519,7 @@ class ADVMeanSquaredError(AutoDifferentiableValue):
 class ADVBinaryCrossEntropy(AutoDifferentiableValue):
     '''Auto Differentiable Binary Cross Entropy Node'''
 
-    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None):
+    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None = None):
         super().__init__()
         self.predictions = predictions
         self.targets = targets
@@ -564,7 +564,7 @@ class ADVBinaryCrossEntropy(AutoDifferentiableValue):
 class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
     '''Auto Differentiable Categorical Cross Entropy Loss Node'''
 
-    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None):
+    def __init__(self, predictions: AutoDifferentiableValue, targets: np.ndarray | None = None):
         super().__init__()
         self.predictions = predictions
         self.targets = targets
