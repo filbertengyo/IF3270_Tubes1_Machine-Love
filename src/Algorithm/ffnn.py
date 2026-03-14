@@ -1,4 +1,6 @@
 from typing import Literal
+from optimizer import *
+from autodiff import *
 import numpy as np
 
 class FFNN:
@@ -18,11 +20,10 @@ class FFNN:
             random_seed: int = 42,
             batch_size: int = 10,
             epochs: int = 5,
-            optimization: None | Literal["adams"] = None,
+            optimizer: Literal["adams", "gd"] = "gd",
             learning_rate: float = 0.1,
-            beta_1: None | float = None,
-            beta_2: None | float = None,
-            epsilon: None | float = None,
+            momentum_gain: None | float = None,
+            rms_gain: None | float = None,
             verbose: bool = False,
         ):
         '''
@@ -41,11 +42,10 @@ class FFNN:
             random_seed (int): integer used as a random seed for random weights or sampling order during training\n
             batch_size (int): size of single batch of sample data used during training for each epoch\n
             epochs (int): how many batches should the model use during training\n
-            optimization (None | "adams"): None for no optimization or "adams" for adams optimization\n
-            learning_rate (None | float): learning rate of the model when using no optimization\n
-            beta_1 (None | float): value of beta 1 parameter when using adams optimization\n
-            beta_2 (None | float): value of beta 2 parameter when using adams optimization\n
-            epsilon (None | float): value of epsilon parameter when using adams optimization\n
+            optimizer ("gd" | "adams"): the preceptron optimizer function used\n
+            learning_rate (None | float): learning rate of the model when using gradient descent optimizer\n
+            momentum_gain (None | float): value of beta 1 parameter when using adams optimizer\n
+            rms_gain (None | float): value of beta 2 parameter when using adams optimizer\n
             verbose (bool): whether the model should log its progress during training or fitting\n
         '''
 
@@ -91,27 +91,26 @@ class FFNN:
         self._batch_size = batch_size
         self._epochs = epochs
 
-        if (optimization and optimization != "adams"):
-            '''TODO: Error on unrecognized optimization method'''
+        self._optimizer = optimizer
 
-        self._optimization = optimization
+        if (optimizer != "gd" and optimizer != "adams"):
+            '''TODO: Error on unrecognized optimizer'''
 
-        if (not optimization and not learning_rate):
-            '''TODO: learning rate not set with no optimization method'''
-
+        if not learning_rate:
+            '''TODO: learning rate not set'''
+        
         self._learning_rate = learning_rate
 
-        if (optimization == "admas" and (beta_1 == None or beta_2 == None or epsilon == None)):
-            '''TODO: beta 1, beta 2, or epsilon not set with adams optimization method'''
+        if (optimizer == "adams" and (momentum_gain == None or rms_gain == None)):
+            '''TODO: momentum gain or rms gain not set with adams optimizer'''
 
-        self._beta_1 = beta_1
-        self._beta_2 = beta_2
-        self._epsilon = epsilon
+        self._momentum_gain = momentum_gain
+        self._rms_gain = rms_gain
 
         self._verbose = verbose
 
     
-    def fit(self, X, y):
+    def fit(self, X: np.ndarray, y: np.ndarray):
         '''
         Fits the model to the given training data
 
@@ -119,6 +118,9 @@ class FFNN:
             X (ndarray): training data features
             y (ndarray): training data labels
         '''
+        
+        # Set RNG
+        rng = np.random.default_rng(seed=self._random_seed)
 
         # Find output layer size
         self._one_hot_encoded = y.ndim == 2
@@ -136,11 +138,11 @@ class FFNN:
         # Determine the weight and bias init func
         match self._weight_initialization:
             case "zero":
-                weight_init_func = lambda shape: np.zeros(*shape)
+                weight_init_func = lambda shape: ADVMatrix(np.zeros(*shape))
             case "uniform":
-                weight_init_func = lambda shape: np.random.rand(*shape) * (self._upper_bound - self._lower_bound) + self._lower_bound
+                weight_init_func = lambda shape: ADVMatrix(rng.uniform(low=self._lower_bound, high=self._upper_bound, size=shape))
             case "normal":
-                weight_init_func = lambda shape: np.random.randn(*shape) * self._variance ** 0.5 + self._mean
+                weight_init_func = lambda shape: ADVMatrix(rng.normal(loc=self._mean, scale=self._variance ** 0.5, size=shape))
             case _:
                 raise ValueError("unknown weight initialization method stored in model")
 
@@ -162,7 +164,89 @@ class FFNN:
                 weight_init_func((self._hidden_layer_sizes[i], 1))
                 for i in range(0, self._hidden_layer_count)
             ] + [weight_init_func((self._label_count, 1))]
+        
+        # Initialize optimizers
+        match self._optimizer:
+            case "gd":
+                optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate)
+            case "adam":
+                optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain)
+            case _:
+                raise ValueError("unknown optimizer stored in model")
+        
+        weight_optimizers = [optimizer_factory(w.value) for w in self._weights]
+        bias_optimizers = [optimizer_factory(b.value) for b in self._bias]
 
+        # Build computation graph
+        activations = (self._hidden_layer_activations or [])
+        activations.append(self._output_layer_activation)
+
+        layer_sizes = (self._hidden_layer_sizes or [])
+        layer_sizes.append(self._label_count)
+
+        self._bias_broadcasts: list[ADVBroadcastTo] = []
+        self._in_matrix = ADVMatrix()
+
+        A = ADVMatTrans(self._in_matrix)
+
+        for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
+            B_shape = (sz, self._batch_size)
+            
+            WA = ADVMatMul(W, A)
+            B = ADVBroadcastTo(b, B_shape)
+            Z = ADVMatAdd(WA, B)
+
+            self._bias_broadcasts.append(B)
+            
+            match fn:
+                case "linear":
+                    A = Z
+                case "relu":
+                    A = ADVReLU(Z)
+                case "sigmoid":
+                    A = ADVSigmoid(Z)
+                case "tanh":
+                    A = ADVTanh(Z)
+                case "softmax":
+                    T = ADVMatTrans(Z)
+                    S = ADVSoftmax(T)
+                    A = ADVMatTrans(S)
+                case _:
+                    raise ValueError("unknown activation function found in model")
+            
+        self._out_matrix = ADVMatTrans(A)
+        
+        match self._loss_function:
+            case "mse":
+                self._loss = ADVMeanSquaredError(self._out_matrix)
+            case "bce":
+                self._loss = ADVBinaryCrossEntropy(self._out_matrix)
+            case "cce":
+                self._loss = ADVCategoricalCrossEntropy(self._out_matrix)
+            case _:
+                raise ValueError("unknown loss function found in model")
+
+        # Scramble the training data
+        needed_samples = self._batch_size * self._epochs
+
+        training_data = np.concatenate(X, y, axis=1)
+        training_order = rng.permutation(training_data)
+
+        while training_order.shape[0] < needed_samples:
+            training_order = np.concatenate(training_order, rng.permutation(training_data))
+        
+        training_order = training_order[:needed_samples, :].reshape((self._batch_size, *training_data.shape))
+
+        # Train on every batch
+        for batch in training_order:
+            self._in_matrix.value = batch
+            self._loss.calculate_value()
+            self._loss.calculate_backward_gradients()
+
+            for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
+                w.value = wo.optimize(w.gradient)
+                b.value = bo.optimize(b.gradient)
+                
     
     def predict(self, X):
         '''
@@ -174,3 +258,4 @@ class FFNN:
         Returns:
             y_pred (ndarray): prediction results
         '''
+    
