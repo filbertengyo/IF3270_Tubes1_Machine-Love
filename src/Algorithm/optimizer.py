@@ -16,7 +16,7 @@ class GradientDescentOptimizer(PerceptronOptimizer):
     '''Perceptron optimizer utilizing standard gradient descent'''
 
     def __init__(self, weights: np.ndarray, learning_rate: float):
-        self.weights = weights
+        super().__init__(weights)
         self.learning_rate = learning_rate
 
     def optimize(self, gradients: np.ndarray) -> np.ndarray:
@@ -30,7 +30,7 @@ class AdamOptimizer(PerceptronOptimizer):
     EPSILON = 1e-8
 
     def __init__(self, weights: np.ndarray, learning_rate: float, momentum_gain: float, rms_gain: float):
-        self.weights = weights
+        super().__init__(weights)
         self.momentum = np.zeros_like(weights)
         self.rms = np.zeros_like(weights)
 
