@@ -305,6 +305,9 @@ class FFNN:
         # Find input layer size
         self._feature_count = X.shape[1]
 
+        if self._verbose:
+            print(f"Starting training with {X.shape[0]} samples, {self._feature_count} features, {self._label_count} labels")
+
         # Determine the weight and bias init func
         match self._weight_initialization:
             case "zero":
@@ -335,6 +338,10 @@ class FFNN:
                 for i in range(0, self._hidden_layer_count)
             ] + [weight_init_func((self._label_count, 1))]
         
+        if self._verbose:
+            total_params = sum(w.value.size for w in self._weights) + sum(b.value.size for b in self._bias)
+            print(f"Weights and biases initialized with {total_params} parameters")
+        
         # Initialize optimizers
         match self._optimizer:
             case "gd":
@@ -347,8 +354,14 @@ class FFNN:
         weight_optimizers = [optimizer_factory(w.value) for w in self._weights]
         bias_optimizers = [optimizer_factory(b.value) for b in self._bias]
 
+        if self._verbose:
+            print("Optimizers initialized")
+
         # Build computation graph
         self._build_computation_graph()
+
+        if self._verbose:
+            print("Computation graph built")
 
         # Scramble the training data
         needed_samples = self._batch_size * self._epochs
@@ -361,17 +374,30 @@ class FFNN:
         
         training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
 
+        if self._verbose:
+            print("Training data scrambled")
+
         # Train on every batch
-        for batch in training_order:
+        for epoch_idx, batch in enumerate(training_order):
+            if self._verbose:
+                print(f"Epoch {epoch_idx + 1}/{self._epochs}")
+            
             self._in_matrix.value = batch[:, :-self._label_count]
             self._loss.targets = batch[:, -self._label_count:]
             self._loss.calculate_value()
+
+            if self._verbose:
+                print(f"  Batch loss: {self._loss.value}")
+            
             self._loss.calculate_backward_gradients()
 
             for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
                 w.value = wo.optimize(w.gradient)
                 b.value = bo.optimize(b.gradient)
-                
+        
+        if self._verbose:
+            print("Training completed")
+            
     
     def predict(self, X: np.ndarray):
         '''
