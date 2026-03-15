@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from typing import Literal
 from optimizer import *
 from autodiff import *
@@ -120,6 +122,7 @@ class FFNN:
 
         self._verbose = verbose
 
+
     def _build_computation_graph(self):
         activations = list(self._hidden_layer_activations or [])
         activations.append(self._output_layer_activation)
@@ -133,7 +136,7 @@ class FFNN:
         A = ADVMatTrans(self._in_matrix)
 
         for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
-            B_shape = (sz, self._batch_size)
+            B_shape = (sz, self._batch_size) if self._batch_size else None
 
             WA = ADVMatMul(W, A)
             B = ADVBroadcastTo(b, B_shape)
@@ -166,10 +169,16 @@ class FFNN:
                 self._loss = ADVBinaryCrossEntropy(self._out_matrix)
             case "cce":
                 self._loss = ADVCategoricalCrossEntropy(self._out_matrix)
-            case _:
-                raise ValueError("unknown loss function found in model")
 
-    def save_weights(self, file_path: str):
+            
+    def save(self, file_path: str):
+        '''
+        Saves the current model to a file
+
+        Args:
+            file_path (str): path to the save file
+        '''
+
         if not hasattr(self, "_weights") or not hasattr(self, "_bias"):
             raise RuntimeError("model has not been trained; fit the model before saving")
 
@@ -177,44 +186,94 @@ class FFNN:
         if not getattr(self, "_one_hot_encoded", False):
             labels = self._labels.tolist() if hasattr(self, "_labels") else None
 
-        metadata = {
+        weights = [w.value for w in self._weights]
+        w_grads = [w.gradient for w in self._weights]
+        biases = [b.value for b in self._bias]
+        b_grads = [b.gradient for b in self._bias]
+
+        payload = {
             "feature_count": int(self._feature_count),
             "label_count": int(self._label_count),
+            "hidden_layers": [{"size": l, "activation": a} for l, a in zip(self._hidden_layer_sizes or [], self._hidden_layer_activations or [])],
+            "final_activation": self._output_layer_activation,
             "one_hot_encoded": bool(self._one_hot_encoded),
             "labels": labels,
+            "weight_count": len(weights),
+            "bias_count": len(biases),
         }
+    
+        arrays: dict[str, np.ndarray] = {
+            "metadata_json": np.array(json.dumps(payload)),
+        }
+    
+        for i, weight in enumerate(weights):
+            arrays[f"weight_{i}"] = np.asarray(weight)
 
-        save_ffnn_weights(
-            file_path=file_path,
-            weights=[w.value for w in self._weights],
-            biases=[b.value for b in self._bias],
-            metadata=metadata,
-        )
+        for i, grad in enumerate(w_grads):
+            arrays[f"w_grad_{i}"] = np.asarray(grad)
+    
+        for i, bias in enumerate(biases):
+            arrays[f"bias_{i}"] = np.asarray(bias)
+        
+        for i, grad in enumerate(b_grads):
+            arrays[f"b_grad_{i}"] = np.asarray(grad)
+    
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        np.savez(file_path, **arrays)
 
-    def load_weights(self, file_path: str):
-        weights, biases, metadata = load_ffnn_weights(file_path)
 
-        expected_layer_count = (self._hidden_layer_count or 0) + 1
-        if len(weights) != expected_layer_count or len(biases) != expected_layer_count:
-            raise ValueError(
-                f"loaded weights have {len(weights)} layers, expected {expected_layer_count} "
-                "based on current model architecture"
-            )
+    @classmethod
+    def load(cls, file_path: str):
+        '''
+        Saves the current model to a file
 
-        self._weights = [ADVMatrix(w) for w in weights]
-        self._bias = [ADVMatrix(b) for b in biases]
+        Args:
+            file_path (str): path to the save file
+        
+        Returns:
+            model (FFNN): the FFNN model stored
+        '''
 
-        self._feature_count = int(metadata["feature_count"])
-        self._label_count = int(metadata["label_count"])
-        self._one_hot_encoded = bool(metadata["one_hot_encoded"])
+        with np.load(file_path, allow_pickle=False) as data:
+            metadata = json.loads(data["metadata_json"].item())
+    
+            weight_count = int(metadata["weight_count"])
+            bias_count = int(metadata["bias_count"])
+    
+            weights = [data[f"weight_{i}"].copy() for i in range(weight_count)]
+            w_grads = [data[f"w_grad_{i}"].copy() for i in range(weight_count)]
+            biases = [data[f"bias_{i}"].copy() for i in range(bias_count)]
+            b_grads = [data[f"b_grad_{i}"].copy() for i in range(bias_count)]
+        
+        hidden_layers = metadata["hidden_layers"]
+        hidden_layer_sizes = [l["size"] for l in hidden_layers]
+        hidden_layer_activations = [l["activation"] for l in hidden_layers]
+
+        model = cls(hidden_layer_sizes, hidden_layer_activations, metadata["final_activation"])
+
+        model._feature_count = int(metadata["feature_count"])
+        model._label_count = int(metadata["label_count"])
+        model._one_hot_encoded = bool(metadata["one_hot_encoded"])
 
         labels = metadata.get("labels")
-        self._labels = np.array(labels) if labels is not None else None
+        model._labels = np.array(labels) if labels is not None else None
 
-        if not self._one_hot_encoded and self._labels is None:
+        if not model._one_hot_encoded and model._labels is None:
             raise ValueError("loaded model requires class labels but labels are missing in metadata")
+        
+        model._weights = [ADVMatrix(w) for w in weights]
+        model._bias = [ADVMatrix(b) for b in biases]
 
-        self._build_computation_graph()
+        for w, g in zip(model._weights, w_grads):
+            w.gradient = g
+
+        for b, g in zip(model._bias, b_grads):
+            b.gradient = g
+
+        model._build_computation_graph()
+
+        return model
 
     
     def fit(self, X: np.ndarray, y: np.ndarray):
