@@ -25,6 +25,8 @@ class FFNN:
             learning_rate: float = 0.1,
             momentum_gain: None | float = None,
             rms_gain: None | float = None,
+            l1_strength: float = 0,
+            l2_strength: float = 0,
             verbose: bool = False,
         ):
         '''
@@ -47,6 +49,8 @@ class FFNN:
             learning_rate (None | float): learning rate of the model when using gradient descent optimizer\n
             momentum_gain (None | float): value of beta 1 parameter when using adams optimizer\n
             rms_gain (None | float): value of beta 2 parameter when using adams optimizer\n
+            l1_strength (float): strength of L1 regularization during model training\n
+            l2_strength (float): strength of L2 regularization during model training\n
             verbose (bool): whether the model should log its progress during training or fitting\n
         '''
 
@@ -110,6 +114,9 @@ class FFNN:
 
         self._momentum_gain = momentum_gain
         self._rms_gain = rms_gain
+
+        self._l1_strength = l1_strength
+        self._l2_strength = l2_strength
 
         self._verbose = verbose
 
@@ -273,9 +280,9 @@ class FFNN:
         # Initialize optimizers
         match self._optimizer:
             case "gd":
-                optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate)
+                optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate, self._l1_strength, self._l2_strength)
             case "adams":
-                optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain)
+                optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain, self._l1_strength, self._l2_strength)
             case _:
                 raise ValueError("unknown optimizer stored in model")
         
