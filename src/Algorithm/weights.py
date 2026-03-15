@@ -1,5 +1,3 @@
-## Ini untuk load dan save weights
-
 import json
 from pathlib import Path
 
