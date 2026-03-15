@@ -54,12 +54,12 @@ class AdamOptimizer(PerceptronOptimizer):
         l2_grad = 2 * self.weights * self.l2_strength
         regularized_gradients = gradients + l1_grad + l2_grad
 
-        uncorrected_momentum = self.momentum_gain * self.momentum + (1 - self.momentum_gain) * regularized_gradients
-        uncorrected_rms = self.rms_gain * self.rms + (1 - self.rms_gain) * (regularized_gradients ** 2)
+        self.momentum = self.momentum_gain * self.momentum + (1 - self.momentum_gain) * regularized_gradients
+        self.rms = self.rms_gain * self.rms + (1 - self.rms_gain) * (regularized_gradients ** 2)
         
-        self.momentum = uncorrected_momentum / (1 - self.momentum_gain ** self.steps)
-        self.rms = uncorrected_rms / (1 - self.rms_gain ** self.steps)
+        corrected_momentum = self.momentum / (1 - self.momentum_gain ** self.steps)
+        corrected_rms = self.rms / (1 - self.rms_gain ** self.steps)
         self.steps += 1
 
-        self.weights -= self.momentum / (np.sqrt(self.rms) + self.EPSILON) * self.learning_rate
+        self.weights -= corrected_momentum / (np.sqrt(corrected_rms) + self.EPSILON) * self.learning_rate
         return self.weights

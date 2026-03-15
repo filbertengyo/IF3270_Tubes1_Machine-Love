@@ -391,6 +391,8 @@ class FFNN:
         for epoch_idx, batch in enumerate(training_order):
             if self._verbose:
                 print(f"Epoch {epoch_idx + 1}/{self._epochs}")
+
+            self._loss.clear_gradients()
             
             self._in_matrix.value = batch[:, :-self._label_count]
             self._loss.targets = batch[:, -self._label_count:]
