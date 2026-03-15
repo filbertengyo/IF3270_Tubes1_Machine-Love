@@ -6,6 +6,7 @@ from autodiff import *
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D
 
 class FFNN:
     "Feedforward Neural Network implementation."
@@ -313,7 +314,7 @@ class FFNN:
         # Determine the weight and bias init func
         match self._weight_initialization:
             case "zero":
-                weight_init_func = lambda shape: ADVMatrix(np.zeros(*shape))
+                weight_init_func = lambda shape: ADVMatrix(np.zeros(shape))
             case "uniform":
                 weight_init_func = lambda shape: ADVMatrix(rng.uniform(low=self._lower_bound, high=self._upper_bound, size=shape))
             case "normal":
@@ -446,60 +447,97 @@ class FFNN:
         return y_pred
 
 
-    def show_weight_distribution(self, layers: list[int]):
+    def show_weight_distribution(self, layers: list[int], bins: int = 50):
         '''
-        Displays an animated distribution graph of weights for specified layers across epochs.
+        Displays a 3D distribution surface of weights for specified layers across epochs.
 
         Args:
             layers (list[int]): list of layer indices to observe
+            bins (int): number of histogram bins
         '''
         if not hasattr(self, '_weights_history'):
             raise ValueError("No training history available. Fit the model first.")
 
-        fig, axes = plt.subplots(len(layers), 1, figsize=(10, 5 * len(layers)))
-        if len(layers) == 1:
-            axes = [axes]
+        epochs = len(self._weights_history)
+        epoch_nums = np.arange(1, epochs + 1)
 
-        def animate(epoch):
-            for i, layer_idx in enumerate(layers):
-                ax = axes[i]
-                ax.clear()
-                weights = self._weights_history[epoch][layer_idx].flatten()
-                ax.hist(weights, bins=50, alpha=0.7)
-                ax.set_title(f'Layer {layer_idx} Weights Distribution - Epoch {epoch + 1}')
-                ax.set_xlabel('Weight Value')
-                ax.set_ylabel('Frequency')
+        fig = plt.figure(figsize=(10, 5 * len(layers)))
+        axes = [fig.add_subplot(len(layers), 1, i + 1, projection='3d') for i in range(len(layers))]
 
-        anim = FuncAnimation(fig, animate, frames=len(self._weights_history), interval=500, repeat=False)
+        # Precompute histograms for each layer and each epoch using a consistent binning
+        hist_data = {}
+        bins_edges = {}
+        for layer_idx in layers:
+            all_weights = np.concatenate([self._weights_history[e][layer_idx].flatten() for e in range(epochs)])
+            edges = np.histogram_bin_edges(all_weights, bins=bins)
+            bins_edges[layer_idx] = edges
+            hist_data[layer_idx] = np.stack(
+                [np.histogram(self._weights_history[e][layer_idx].flatten(), bins=edges)[0] for e in range(epochs)]
+            )
+
+        for i, layer_idx in enumerate(layers):
+            ax = axes[i]
+            edges = bins_edges[layer_idx]
+            centers = (edges[:-1] + edges[1:]) / 2
+
+            X, Y = np.meshgrid(centers, epoch_nums)
+            Z = hist_data[layer_idx]
+
+            ax.plot_surface(X, Y, Z, cmap='viridis')
+            ax.set_title(f'Layer {layer_idx} Weights Distribution over Epochs')
+            ax.set_xlabel('Weight Value')
+            ax.set_ylabel('Epoch')
+            ax.set_zlabel('Frequency')
+
+        plt.tight_layout()
         plt.show()
 
 
-    def show_gradient_distribution(self, layers: list[int]):
+    def show_gradient_distribution(self, layers: list[int], bins: int = 50):
         '''
-        Displays an animated distribution graph of gradients for specified layers across epochs.
+        Displays a 3D distribution surface of gradients for specified layers across epochs.
 
         Args:
             layers (list[int]): list of layer indices to observe
+            bins (int): number of histogram bins
         '''
         if not hasattr(self, '_weights_grad_history'):
             raise ValueError("No training history available. Fit the model first.")
 
-        fig, axes = plt.subplots(len(layers), 1, figsize=(10, 5 * len(layers)))
-        if len(layers) == 1:
-            axes = [axes]
+        epochs = len(self._weights_grad_history)
+        epoch_nums = np.arange(1, epochs + 1)
 
-        def animate(epoch):
-            for i, layer_idx in enumerate(layers):
-                ax = axes[i]
-                ax.clear()
-                gradients = self._weights_grad_history[epoch][layer_idx].flatten()
-                ax.hist(gradients, bins=50, alpha=0.7)
-                ax.set_title(f'Layer {layer_idx} Gradients Distribution - Epoch {epoch + 1}')
-                ax.set_xlabel('Gradient Value')
-                ax.set_ylabel('Frequency')
+        fig = plt.figure(figsize=(10, 5 * len(layers)))
+        axes = [fig.add_subplot(len(layers), 1, i + 1, projection='3d') for i in range(len(layers))]
 
-        anim = FuncAnimation(fig, animate, frames=len(self._weights_grad_history), interval=500, repeat=False)
+        # Precompute histograms for each layer and each epoch using a consistent binning
+        hist_data = {}
+        bins_edges = {}
+        for layer_idx in layers:
+            all_grads = np.concatenate([self._weights_grad_history[e][layer_idx].flatten() for e in range(epochs)])
+            edges = np.histogram_bin_edges(all_grads, bins=bins)
+            bins_edges[layer_idx] = edges
+            hist_data[layer_idx] = np.stack(
+                [np.histogram(self._weights_grad_history[e][layer_idx].flatten(), bins=edges)[0] for e in range(epochs)]
+            )
+
+        for i, layer_idx in enumerate(layers):
+            ax = axes[i]
+            edges = bins_edges[layer_idx]
+            centers = (edges[:-1] + edges[1:]) / 2
+
+            X, Y = np.meshgrid(centers, epoch_nums)
+            Z = hist_data[layer_idx]
+
+            ax.plot_surface(X, Y, Z, cmap='viridis')
+            ax.set_title(f'Layer {layer_idx} Gradients Distribution over Epochs')
+            ax.set_xlabel('Gradient Value')
+            ax.set_ylabel('Epoch')
+            ax.set_zlabel('Frequency')
+
+        plt.tight_layout()
         plt.show()
+
 
     def plot_loss(self):
         '''
