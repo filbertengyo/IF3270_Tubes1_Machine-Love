@@ -1,8 +1,12 @@
+import json
+from pathlib import Path
 from typing import Literal
 from optimizer import *
 from autodiff import *
-from weights import save_weights as save_ffnn_weights, load_weights as load_ffnn_weights
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from mpl_toolkits.mplot3d import Axes3D
 
 class FFNN:
     "Feedforward Neural Network implementation."
@@ -25,6 +29,8 @@ class FFNN:
             learning_rate: float = 0.1,
             momentum_gain: None | float = None,
             rms_gain: None | float = None,
+            l1_strength: float = 0,
+            l2_strength: float = 0,
             verbose: bool = False,
         ):
         '''
@@ -47,6 +53,8 @@ class FFNN:
             learning_rate (None | float): learning rate of the model when using gradient descent optimizer\n
             momentum_gain (None | float): value of beta 1 parameter when using adams optimizer\n
             rms_gain (None | float): value of beta 2 parameter when using adams optimizer\n
+            l1_strength (float): strength of L1 regularization during model training\n
+            l2_strength (float): strength of L2 regularization during model training\n
             verbose (bool): whether the model should log its progress during training or fitting\n
         '''
 
@@ -111,7 +119,11 @@ class FFNN:
         self._momentum_gain = momentum_gain
         self._rms_gain = rms_gain
 
+        self._l1_strength = l1_strength
+        self._l2_strength = l2_strength
+
         self._verbose = verbose
+
 
     def _build_computation_graph(self):
         activations = list(self._hidden_layer_activations or [])
@@ -126,7 +138,7 @@ class FFNN:
         A = ADVMatTrans(self._in_matrix)
 
         for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
-            B_shape = (sz, self._batch_size)
+            B_shape = (sz, self._batch_size) if self._batch_size else None
 
             WA = ADVMatMul(W, A)
             B = ADVBroadcastTo(b, B_shape)
@@ -159,10 +171,16 @@ class FFNN:
                 self._loss = ADVBinaryCrossEntropy(self._out_matrix)
             case "cce":
                 self._loss = ADVCategoricalCrossEntropy(self._out_matrix)
-            case _:
-                raise ValueError("unknown loss function found in model")
 
-    def save_weights(self, file_path: str):
+            
+    def save(self, file_path: str):
+        '''
+        Saves the current model to a file
+
+        Args:
+            file_path (str): path to the save file
+        '''
+
         if not hasattr(self, "_weights") or not hasattr(self, "_bias"):
             raise RuntimeError("model has not been trained; fit the model before saving")
 
@@ -170,44 +188,94 @@ class FFNN:
         if not getattr(self, "_one_hot_encoded", False):
             labels = self._labels.tolist() if hasattr(self, "_labels") else None
 
-        metadata = {
+        weights = [w.value for w in self._weights]
+        w_grads = [w.gradient for w in self._weights]
+        biases = [b.value for b in self._bias]
+        b_grads = [b.gradient for b in self._bias]
+
+        payload = {
             "feature_count": int(self._feature_count),
             "label_count": int(self._label_count),
+            "hidden_layers": [{"size": l, "activation": a} for l, a in zip(self._hidden_layer_sizes or [], self._hidden_layer_activations or [])],
+            "final_activation": self._output_layer_activation,
             "one_hot_encoded": bool(self._one_hot_encoded),
             "labels": labels,
+            "weight_count": len(weights),
+            "bias_count": len(biases),
         }
+    
+        arrays: dict[str, np.ndarray] = {
+            "metadata_json": np.array(json.dumps(payload)),
+        }
+    
+        for i, weight in enumerate(weights):
+            arrays[f"weight_{i}"] = np.asarray(weight)
 
-        save_ffnn_weights(
-            file_path=file_path,
-            weights=[w.value for w in self._weights],
-            biases=[b.value for b in self._bias],
-            metadata=metadata,
-        )
+        for i, grad in enumerate(w_grads):
+            arrays[f"w_grad_{i}"] = np.asarray(grad)
+    
+        for i, bias in enumerate(biases):
+            arrays[f"bias_{i}"] = np.asarray(bias)
+        
+        for i, grad in enumerate(b_grads):
+            arrays[f"b_grad_{i}"] = np.asarray(grad)
+    
+        Path(file_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        np.savez(file_path, **arrays)
 
-    def load_weights(self, file_path: str):
-        weights, biases, metadata = load_ffnn_weights(file_path)
 
-        expected_layer_count = (self._hidden_layer_count or 0) + 1
-        if len(weights) != expected_layer_count or len(biases) != expected_layer_count:
-            raise ValueError(
-                f"loaded weights have {len(weights)} layers, expected {expected_layer_count} "
-                "based on current model architecture"
-            )
+    @classmethod
+    def load(cls, file_path: str):
+        '''
+        Saves the current model to a file
 
-        self._weights = [ADVMatrix(w) for w in weights]
-        self._bias = [ADVMatrix(b) for b in biases]
+        Args:
+            file_path (str): path to the save file
+        
+        Returns:
+            model (FFNN): the FFNN model stored
+        '''
 
-        self._feature_count = int(metadata["feature_count"])
-        self._label_count = int(metadata["label_count"])
-        self._one_hot_encoded = bool(metadata["one_hot_encoded"])
+        with np.load(file_path, allow_pickle=False) as data:
+            metadata = json.loads(data["metadata_json"].item())
+    
+            weight_count = int(metadata["weight_count"])
+            bias_count = int(metadata["bias_count"])
+    
+            weights = [data[f"weight_{i}"].copy() for i in range(weight_count)]
+            w_grads = [data[f"w_grad_{i}"].copy() for i in range(weight_count)]
+            biases = [data[f"bias_{i}"].copy() for i in range(bias_count)]
+            b_grads = [data[f"b_grad_{i}"].copy() for i in range(bias_count)]
+        
+        hidden_layers = metadata["hidden_layers"]
+        hidden_layer_sizes = [l["size"] for l in hidden_layers]
+        hidden_layer_activations = [l["activation"] for l in hidden_layers]
+
+        model = cls(hidden_layer_sizes, hidden_layer_activations, metadata["final_activation"])
+
+        model._feature_count = int(metadata["feature_count"])
+        model._label_count = int(metadata["label_count"])
+        model._one_hot_encoded = bool(metadata["one_hot_encoded"])
 
         labels = metadata.get("labels")
-        self._labels = np.array(labels) if labels is not None else None
+        model._labels = np.array(labels) if labels is not None else None
 
-        if not self._one_hot_encoded and self._labels is None:
+        if not model._one_hot_encoded and model._labels is None:
             raise ValueError("loaded model requires class labels but labels are missing in metadata")
+        
+        model._weights = [ADVMatrix(w) for w in weights]
+        model._bias = [ADVMatrix(b) for b in biases]
 
-        self._build_computation_graph()
+        for w, g in zip(model._weights, w_grads):
+            w.gradient = g
+
+        for b, g in zip(model._bias, b_grads):
+            b.gradient = g
+
+        model._build_computation_graph()
+
+        return model
 
     
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -240,10 +308,13 @@ class FFNN:
         # Find input layer size
         self._feature_count = X.shape[1]
 
+        if self._verbose:
+            print(f"Starting training with {X.shape[0]} samples, {self._feature_count} features, {self._label_count} labels")
+
         # Determine the weight and bias init func
         match self._weight_initialization:
             case "zero":
-                weight_init_func = lambda shape: ADVMatrix(np.zeros(*shape))
+                weight_init_func = lambda shape: ADVMatrix(np.zeros(shape))
             case "uniform":
                 weight_init_func = lambda shape: ADVMatrix(rng.uniform(low=self._lower_bound, high=self._upper_bound, size=shape))
             case "normal":
@@ -270,20 +341,30 @@ class FFNN:
                 for i in range(0, self._hidden_layer_count)
             ] + [weight_init_func((self._label_count, 1))]
         
+        if self._verbose:
+            total_params = sum(w.value.size for w in self._weights) + sum(b.value.size for b in self._bias)
+            print(f"Weights and biases initialized with {total_params} parameters")
+        
         # Initialize optimizers
         match self._optimizer:
             case "gd":
-                optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate)
+                optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate, self._l1_strength, self._l2_strength)
             case "adams":
-                optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain)
+                optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain, self._l1_strength, self._l2_strength)
             case _:
                 raise ValueError("unknown optimizer stored in model")
         
         weight_optimizers = [optimizer_factory(w.value) for w in self._weights]
         bias_optimizers = [optimizer_factory(b.value) for b in self._bias]
 
+        if self._verbose:
+            print("Optimizers initialized")
+
         # Build computation graph
         self._build_computation_graph()
+
+        if self._verbose:
+            print("Computation graph built")
 
         # Scramble the training data
         needed_samples = self._batch_size * self._epochs
@@ -296,17 +377,45 @@ class FFNN:
         
         training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
 
+        if self._verbose:
+            print("Training data scrambled")
+
+        # Initialize history storage
+        self._weights_history = []
+        self._biases_history = []
+        self._weights_grad_history = []
+        self._biases_grad_history = []
+        self._loss_history = []
+
         # Train on every batch
-        for batch in training_order:
+        for epoch_idx, batch in enumerate(training_order):
+            if self._verbose:
+                print(f"Epoch {epoch_idx + 1}/{self._epochs}")
+            
             self._in_matrix.value = batch[:, :-self._label_count]
             self._loss.targets = batch[:, -self._label_count:]
             self._loss.calculate_value()
+
+            self._loss_history.append(self._loss.value)
+
+            if self._verbose:
+                print(f"  Batch loss: {self._loss.value}")
+            
             self._loss.calculate_backward_gradients()
 
             for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
                 w.value = wo.optimize(w.gradient)
                 b.value = bo.optimize(b.gradient)
-                
+            
+            # Store current weights, biases, and gradients after epoch
+            self._weights_history.append([w.value.copy() for w in self._weights])
+            self._biases_history.append([b.value.copy() for b in self._bias])
+            self._weights_grad_history.append([w.gradient.copy() for w in self._weights])
+            self._biases_grad_history.append([b.gradient.copy() for b in self._bias])
+        
+        if self._verbose:
+            print("Training completed")
+            
     
     def predict(self, X: np.ndarray):
         '''
@@ -336,3 +445,112 @@ class FFNN:
             y_pred = self._labels[y_pred_ohe.argmax(axis=1)]
         
         return y_pred
+
+
+    def show_weight_distribution(self, layers: list[int], bins: int = 50):
+        '''
+        Displays a 3D distribution surface of weights for specified layers across epochs.
+
+        Args:
+            layers (list[int]): list of layer indices to observe
+            bins (int): number of histogram bins
+        '''
+        if not hasattr(self, '_weights_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        epochs = len(self._weights_history)
+        epoch_nums = np.arange(1, epochs + 1)
+
+        fig = plt.figure(figsize=(10, 5 * len(layers)))
+        axes = [fig.add_subplot(len(layers), 1, i + 1, projection='3d') for i in range(len(layers))]
+
+        # Precompute histograms for each layer and each epoch using a consistent binning
+        hist_data = {}
+        bins_edges = {}
+        for layer_idx in layers:
+            all_weights = np.concatenate([self._weights_history[e][layer_idx].flatten() for e in range(epochs)])
+            edges = np.histogram_bin_edges(all_weights, bins=bins)
+            bins_edges[layer_idx] = edges
+            hist_data[layer_idx] = np.stack(
+                [np.histogram(self._weights_history[e][layer_idx].flatten(), bins=edges)[0] for e in range(epochs)]
+            )
+
+        for i, layer_idx in enumerate(layers):
+            ax = axes[i]
+            edges = bins_edges[layer_idx]
+            centers = (edges[:-1] + edges[1:]) / 2
+
+            X, Y = np.meshgrid(centers, epoch_nums)
+            Z = hist_data[layer_idx]
+
+            ax.plot_surface(X, Y, Z, cmap='viridis')
+            ax.set_title(f'Layer {layer_idx} Weights Distribution over Epochs')
+            ax.set_xlabel('Weight Value')
+            ax.set_ylabel('Epoch')
+            ax.set_zlabel('Frequency')
+
+        plt.tight_layout()
+        plt.show()
+
+
+    def show_gradient_distribution(self, layers: list[int], bins: int = 50):
+        '''
+        Displays a 3D distribution surface of gradients for specified layers across epochs.
+
+        Args:
+            layers (list[int]): list of layer indices to observe
+            bins (int): number of histogram bins
+        '''
+        if not hasattr(self, '_weights_grad_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        epochs = len(self._weights_grad_history)
+        epoch_nums = np.arange(1, epochs + 1)
+
+        fig = plt.figure(figsize=(10, 5 * len(layers)))
+        axes = [fig.add_subplot(len(layers), 1, i + 1, projection='3d') for i in range(len(layers))]
+
+        # Precompute histograms for each layer and each epoch using a consistent binning
+        hist_data = {}
+        bins_edges = {}
+        for layer_idx in layers:
+            all_grads = np.concatenate([self._weights_grad_history[e][layer_idx].flatten() for e in range(epochs)])
+            edges = np.histogram_bin_edges(all_grads, bins=bins)
+            bins_edges[layer_idx] = edges
+            hist_data[layer_idx] = np.stack(
+                [np.histogram(self._weights_grad_history[e][layer_idx].flatten(), bins=edges)[0] for e in range(epochs)]
+            )
+
+        for i, layer_idx in enumerate(layers):
+            ax = axes[i]
+            edges = bins_edges[layer_idx]
+            centers = (edges[:-1] + edges[1:]) / 2
+
+            X, Y = np.meshgrid(centers, epoch_nums)
+            Z = hist_data[layer_idx]
+
+            ax.plot_surface(X, Y, Z, cmap='viridis')
+            ax.set_title(f'Layer {layer_idx} Gradients Distribution over Epochs')
+            ax.set_xlabel('Gradient Value')
+            ax.set_ylabel('Epoch')
+            ax.set_zlabel('Frequency')
+
+        plt.tight_layout()
+        plt.show()
+
+
+    def plot_loss(self):
+        '''
+        Plots the loss over epochs.
+        '''
+        if not hasattr(self, '_loss_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        epochs = range(1, len(self._loss_history) + 1)
+        plt.figure(figsize=(10, 5))
+        plt.plot(epochs, self._loss_history)
+        plt.title('Loss Over Epochs')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid(True)
+        plt.show()

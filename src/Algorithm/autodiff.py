@@ -568,7 +568,7 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
         super().__init__()
         self.predictions = predictions
         self.targets = targets
-        self.epsilon = 1e-7
+        self.epsilon = 1e-8
     
     def clear_gradients(self):
         self.gradient = None
