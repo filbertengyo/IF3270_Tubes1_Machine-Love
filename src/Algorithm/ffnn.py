@@ -4,6 +4,8 @@ from typing import Literal
 from optimizer import *
 from autodiff import *
 import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 
 class FFNN:
     "Feedforward Neural Network implementation."
@@ -377,6 +379,12 @@ class FFNN:
         if self._verbose:
             print("Training data scrambled")
 
+        # Initialize history storage
+        self._weights_history = []
+        self._biases_history = []
+        self._weights_grad_history = []
+        self._biases_grad_history = []
+
         # Train on every batch
         for epoch_idx, batch in enumerate(training_order):
             if self._verbose:
@@ -394,6 +402,12 @@ class FFNN:
             for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
                 w.value = wo.optimize(w.gradient)
                 b.value = bo.optimize(b.gradient)
+            
+            # Store current weights, biases, and gradients after epoch
+            self._weights_history.append([w.value.copy() for w in self._weights])
+            self._biases_history.append([b.value.copy() for b in self._bias])
+            self._weights_grad_history.append([w.gradient.copy() for w in self._weights])
+            self._biases_grad_history.append([b.gradient.copy() for b in self._bias])
         
         if self._verbose:
             print("Training completed")
@@ -427,3 +441,59 @@ class FFNN:
             y_pred = self._labels[y_pred_ohe.argmax(axis=1)]
         
         return y_pred
+
+
+    def show_weight_distribution(self, layers: list[int]):
+        '''
+        Displays an animated distribution graph of weights for specified layers across epochs.
+
+        Args:
+            layers (list[int]): list of layer indices to observe
+        '''
+        if not hasattr(self, '_weights_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        fig, axes = plt.subplots(len(layers), 1, figsize=(10, 5 * len(layers)))
+        if len(layers) == 1:
+            axes = [axes]
+
+        def animate(epoch):
+            for i, layer_idx in enumerate(layers):
+                ax = axes[i]
+                ax.clear()
+                weights = self._weights_history[epoch][layer_idx].flatten()
+                ax.hist(weights, bins=50, alpha=0.7)
+                ax.set_title(f'Layer {layer_idx} Weights Distribution - Epoch {epoch + 1}')
+                ax.set_xlabel('Weight Value')
+                ax.set_ylabel('Frequency')
+
+        anim = FuncAnimation(fig, animate, frames=len(self._weights_history), interval=500, repeat=False)
+        plt.show()
+
+
+    def show_gradient_distribution(self, layers: list[int]):
+        '''
+        Displays an animated distribution graph of gradients for specified layers across epochs.
+
+        Args:
+            layers (list[int]): list of layer indices to observe
+        '''
+        if not hasattr(self, '_weights_grad_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        fig, axes = plt.subplots(len(layers), 1, figsize=(10, 5 * len(layers)))
+        if len(layers) == 1:
+            axes = [axes]
+
+        def animate(epoch):
+            for i, layer_idx in enumerate(layers):
+                ax = axes[i]
+                ax.clear()
+                gradients = self._weights_grad_history[epoch][layer_idx].flatten()
+                ax.hist(gradients, bins=50, alpha=0.7)
+                ax.set_title(f'Layer {layer_idx} Gradients Distribution - Epoch {epoch + 1}')
+                ax.set_xlabel('Gradient Value')
+                ax.set_ylabel('Frequency')
+
+        anim = FuncAnimation(fig, animate, frames=len(self._weights_grad_history), interval=500, repeat=False)
+        plt.show()
