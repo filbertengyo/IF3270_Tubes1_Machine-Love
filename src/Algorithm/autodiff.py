@@ -1,4 +1,4 @@
-﻿from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod
 import numpy as np
 
 class AutoDifferentiableValue(ABC):
@@ -326,14 +326,24 @@ class ADVBroadcastTo(AutoDifferentiableValue):
             return
 
         local_grad = _upstream.copy()
+        # Old:
+        # for axis, dim in enumerate(self.original_shape):
+        #     if dim == 1 and local_grad.shape[axis] > 1:
+        #         local_grad = np.sum(local_grad, axis=axis, keepdims=True)
         
+        # Reduce extra leading dimensions that were added by broadcast
         extra_dims = len(local_grad.shape) - len(self.original_shape)
         if extra_dims > 0:
             local_grad = np.sum(local_grad, axis=tuple(range(extra_dims)))
-            
-        for axis, dim in enumerate(self.original_shape):
-            if dim == 1 and local_grad.shape[axis] > 1:
-                local_grad = np.sum(local_grad, axis=axis, keepdims=True)
+
+        # Collect all axes that need to be reduced (where original dim == 1 but broadcast dim > 1)
+        # Sum them all at once to avoid index-shift bugs from sequential per-axis summing
+        reduce_axes = tuple(
+            axis for axis, (orig_dim, broad_dim) in enumerate(zip(self.original_shape, local_grad.shape))
+            if orig_dim == 1 and broad_dim > 1
+        )
+        if reduce_axes:
+            local_grad = np.sum(local_grad, axis=reduce_axes, keepdims=True)
                 
         self.source.calculate_backward_gradients(local_grad)
 
