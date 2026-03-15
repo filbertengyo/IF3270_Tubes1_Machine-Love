@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Literal
 from optimizer import *
 from autodiff import *
-from weights import save_weights as save_ffnn_weights, load_weights as load_ffnn_weights
 import numpy as np
 
 class FFNN:
