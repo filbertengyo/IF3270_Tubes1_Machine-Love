@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+﻿from abc import ABC, abstractmethod
 import numpy as np
 
 class AutoDifferentiableValue(ABC):
@@ -17,7 +17,7 @@ class AutoDifferentiableValue(ABC):
         raise NotImplementedError()
 
     def calculate_backward_gradients(self, _upstream: np.ndarray | None = None) -> np.ndarray:
-        if _upstream == None:
+        if _upstream is None:
             self.gradient = np.ones_like(self.value)
             return self.gradient.copy()
         elif self.gradient is None:
@@ -62,7 +62,7 @@ class ADVMatMul(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -73,7 +73,7 @@ class ADVMatMul(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.lhs.value == None or self.rhs.value == None:
+        if self.lhs.value is None or self.rhs.value is None:
             self.lhs.clear_gradients()
             self.rhs.clear_gradients()
             return
@@ -99,7 +99,7 @@ class ADVMatAdd(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -130,7 +130,7 @@ class ADVMatSub(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -141,7 +141,7 @@ class ADVMatSub(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.lhs.value == None or self.rhs.value == None:
+        if self.lhs.value is None or self.rhs.value is None:
             self.lhs.clear_gradients()
             self.rhs.clear_gradients()
             return
@@ -167,7 +167,7 @@ class ADVMatElMul(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -178,7 +178,7 @@ class ADVMatElMul(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.lhs.value == None or self.rhs.value == None:
+        if self.lhs.value is None or self.rhs.value is None:
             self.lhs.clear_gradients()
             self.rhs.clear_gradients()
             return
@@ -204,7 +204,7 @@ class ADVMatElDiv(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -215,7 +215,7 @@ class ADVMatElDiv(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.lhs.value == None or self.rhs.value == None:
+        if self.lhs.value is None or self.rhs.value is None:
             self.lhs.clear_gradients()
             self.rhs.clear_gradients()
             return
@@ -241,7 +241,7 @@ class ADVMatElPow(AutoDifferentiableValue):
         lhs = self.lhs.calculate_value()
         rhs = self.rhs.calculate_value()
 
-        if lhs == None or rhs == None:
+        if lhs is None or rhs is None:
             self.value = None
             return None
 
@@ -252,7 +252,7 @@ class ADVMatElPow(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.lhs.value == None or self.rhs.value == None or self.value == None:
+        if self.lhs.value is None or self.rhs.value is None or self.value is None:
             self.lhs.clear_gradients()
             self.rhs.clear_gradients()
             return
@@ -275,7 +275,7 @@ class ADVMatTrans(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         opr = self.opr.calculate_value()
 
-        if opr == None:
+        if opr is None:
             self.value = None
             return None
 
@@ -286,7 +286,7 @@ class ADVMatTrans(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.opr.value == None:
+        if self.opr.value is None:
             self.opr.clear_gradients()
             return
 
@@ -309,7 +309,7 @@ class ADVBroadcastTo(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         source = self.source.calculate_value()
 
-        if source == None or self.target_shape == None:
+        if source is None or self.target_shape is None:
             self.value = None
             return None
 
@@ -321,7 +321,7 @@ class ADVBroadcastTo(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.original_shape == None:
+        if self.original_shape is None:
             self.source.clear_gradients()
             return
 
@@ -352,7 +352,7 @@ class ADVReLU(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         inputs = self.inputs.calculate_value()
 
-        if inputs == None:
+        if inputs is None:
             self.value = None
             return None
 
@@ -363,7 +363,7 @@ class ADVReLU(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.inputs.value == None:
+        if self.inputs.value is None:
             self.inputs.clear_gradients()
             return
 
@@ -384,7 +384,7 @@ class ADVSigmoid(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         inputs = self.inputs.calculate_value()
 
-        if inputs == None:
+        if inputs is None:
             self.value = None
             return None
 
@@ -395,7 +395,7 @@ class ADVSigmoid(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.value == None:
+        if self.value is None:
             self.inputs.clear_gradients()
             return
 
@@ -421,7 +421,7 @@ class ADVTanh(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         inputs = self.inputs.calculate_value()
 
-        if inputs == None:
+        if inputs is None:
             self.value = None
             return None
 
@@ -434,7 +434,7 @@ class ADVTanh(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.value == None:
+        if self.value is None:
             self.inputs.clear_gradients()
             return
 
@@ -455,7 +455,7 @@ class ADVSoftmax(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         logits = self.logits.calculate_value()
 
-        if logits == None:
+        if logits is None:
             self.value = None
             return None
 
@@ -470,7 +470,7 @@ class ADVSoftmax(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.value == None:
+        if self.value is None:
             self.logits.clear_gradients()
             return
         
@@ -495,7 +495,7 @@ class ADVMeanSquaredError(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         predictions = self.predictions.calculate_value()
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.value = None
             return None
 
@@ -506,7 +506,7 @@ class ADVMeanSquaredError(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.predictions.clear_gradients()
             return
         
@@ -532,7 +532,7 @@ class ADVBinaryCrossEntropy(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         predictions = self.predictions.calculate_value()
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.value = None
             return None
 
@@ -547,7 +547,7 @@ class ADVBinaryCrossEntropy(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.predictions.clear_gradients()
             return
 
@@ -577,7 +577,7 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
     def calculate_value(self) -> None | np.ndarray | float:
         predictions = self.predictions.calculate_value()
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.value = None
             return None
 
@@ -591,7 +591,7 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
     def calculate_backward_gradients(self, _upstream = None):          
         _upstream = super().calculate_backward_gradients(_upstream)
 
-        if self.targets == None or self.predictions.value == None:
+        if self.targets is None or self.predictions.value is None:
             self.predictions.clear_gradients()
             return
         
@@ -600,3 +600,4 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
         
         local_grad = -(self.targets / safe_preds) / batch_size
         self.predictions.calculate_backward_gradients(local_grad * _upstream)
+

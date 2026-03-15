@@ -1,6 +1,7 @@
 from typing import Literal
 from optimizer import *
 from autodiff import *
+from weights import save_weights as save_ffnn_weights, load_weights as load_ffnn_weights
 import numpy as np
 
 class FFNN:
@@ -49,40 +50,43 @@ class FFNN:
             verbose (bool): whether the model should log its progress during training or fitting\n
         '''
 
-        if (((hidden_layer_sizes == None) != (hidden_layer_activations == None)) or (len(hidden_layer_sizes) != len(hidden_layer_activations))):
-            '''TODO: Error on mismatching hidden layer count'''
+        if ((hidden_layer_sizes is None) != (hidden_layer_activations is None)):
+            raise ValueError("hidden layer sizes and activations must both be provided or both be None")
 
-        self._hidden_layer_count = len(hidden_layer_sizes) if hidden_layer_sizes != None else None
+        if hidden_layer_sizes is not None and hidden_layer_activations is not None and len(hidden_layer_sizes) != len(hidden_layer_activations):
+            raise ValueError("hidden layer sizes count must match hidden layer activations count")
+
+        self._hidden_layer_count = len(hidden_layer_sizes) if hidden_layer_sizes is not None else None
         self._hidden_layer_sizes = hidden_layer_sizes
 
-        if (hidden_layer_activations and (activation not in ["linear", "relu", "sigmoid", "tanh", "softmax"] for activation in hidden_layer_activations)):
-            '''TODO: Error on unrecognized activation function'''
+        if hidden_layer_activations and any(activation not in ["linear", "relu", "sigmoid", "tanh", "softmax"] for activation in hidden_layer_activations):
+            raise ValueError("unknown activation function in hidden layers")
         
         self._hidden_layer_activations = hidden_layer_activations
 
         if (output_layer_activation not in ["linear", "relu", "sigmoid", "tanh", "softmax"]):
-            '''TODO: Error on unrecognized activation function'''
+            raise ValueError("unknown output layer activation function")
 
         self._output_layer_activation = output_layer_activation
 
         if (loss_function not in ["mse", "bce", "cce"]):
-            '''TODO: Error on unrecognized loss function'''
+            raise ValueError("unknown loss function")
 
         self._loss_function = loss_function
 
-        if (weight_initialization not in ["zero" | "uniform" | "normal"]):
-            '''TODO: Error on unrecognized weight initialization method'''
+        if (weight_initialization not in ["zero", "uniform", "normal"]):
+            raise ValueError("unknown weight initialization method")
 
         self._weight_initialization = weight_initialization
 
-        if (weight_initialization == "uniform" and (lower_bound == None or upper_bound == None)):
-            '''TODO: Error on lower or upper bound not set with uniform weight initialization'''
+        if (weight_initialization == "uniform" and (lower_bound is None or upper_bound is None)):
+            raise ValueError("lower_bound and upper_bound are required for uniform initialization")
 
         self._lower_bound = lower_bound
         self._upper_bound = upper_bound
 
-        if (weight_initialization == "normal" and (mean == None or variance == None)):
-            '''TODO: Error on mean or variance not set with normal weight initialization'''
+        if (weight_initialization == "normal" and (mean is None or variance is None)):
+            raise ValueError("mean and variance are required for normal initialization")
 
         self._mean = mean
         self._variance = variance
@@ -94,20 +98,116 @@ class FFNN:
         self._optimizer = optimizer
 
         if (optimizer != "gd" and optimizer != "adams"):
-            '''TODO: Error on unrecognized optimizer'''
+            raise ValueError("unknown optimizer")
 
-        if not learning_rate:
-            '''TODO: learning rate not set'''
+        if learning_rate is None:
+            raise ValueError("learning_rate must be set")
         
         self._learning_rate = learning_rate
 
-        if (optimizer == "adams" and (momentum_gain == None or rms_gain == None)):
-            '''TODO: momentum gain or rms gain not set with adams optimizer'''
+        if (optimizer == "adams" and (momentum_gain is None or rms_gain is None)):
+            raise ValueError("momentum_gain and rms_gain must be set when using adams optimizer")
 
         self._momentum_gain = momentum_gain
         self._rms_gain = rms_gain
 
         self._verbose = verbose
+
+    def _build_computation_graph(self):
+        activations = list(self._hidden_layer_activations or [])
+        activations.append(self._output_layer_activation)
+
+        layer_sizes = list(self._hidden_layer_sizes or [])
+        layer_sizes.append(self._label_count)
+
+        self._bias_broadcasts: list[ADVBroadcastTo] = []
+        self._in_matrix = ADVMatrix()
+
+        A = ADVMatTrans(self._in_matrix)
+
+        for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
+            B_shape = (sz, self._batch_size)
+
+            WA = ADVMatMul(W, A)
+            B = ADVBroadcastTo(b, B_shape)
+            Z = ADVMatAdd(WA, B)
+
+            self._bias_broadcasts.append(B)
+
+            match fn:
+                case "linear":
+                    A = Z
+                case "relu":
+                    A = ADVReLU(Z)
+                case "sigmoid":
+                    A = ADVSigmoid(Z)
+                case "tanh":
+                    A = ADVTanh(Z)
+                case "softmax":
+                    T = ADVMatTrans(Z)
+                    S = ADVSoftmax(T)
+                    A = ADVMatTrans(S)
+                case _:
+                    raise ValueError("unknown activation function found in model")
+
+        self._out_matrix = ADVMatTrans(A)
+
+        match self._loss_function:
+            case "mse":
+                self._loss = ADVMeanSquaredError(self._out_matrix)
+            case "bce":
+                self._loss = ADVBinaryCrossEntropy(self._out_matrix)
+            case "cce":
+                self._loss = ADVCategoricalCrossEntropy(self._out_matrix)
+            case _:
+                raise ValueError("unknown loss function found in model")
+
+    def save_weights(self, file_path: str):
+        if not hasattr(self, "_weights") or not hasattr(self, "_bias"):
+            raise RuntimeError("model has not been trained; fit the model before saving")
+
+        labels = None
+        if not getattr(self, "_one_hot_encoded", False):
+            labels = self._labels.tolist() if hasattr(self, "_labels") else None
+
+        metadata = {
+            "feature_count": int(self._feature_count),
+            "label_count": int(self._label_count),
+            "one_hot_encoded": bool(self._one_hot_encoded),
+            "labels": labels,
+        }
+
+        save_ffnn_weights(
+            file_path=file_path,
+            weights=[w.value for w in self._weights],
+            biases=[b.value for b in self._bias],
+            metadata=metadata,
+        )
+
+    def load_weights(self, file_path: str):
+        weights, biases, metadata = load_ffnn_weights(file_path)
+
+        expected_layer_count = (self._hidden_layer_count or 0) + 1
+        if len(weights) != expected_layer_count or len(biases) != expected_layer_count:
+            raise ValueError(
+                f"loaded weights have {len(weights)} layers, expected {expected_layer_count} "
+                "based on current model architecture"
+            )
+
+        self._weights = [ADVMatrix(w) for w in weights]
+        self._bias = [ADVMatrix(b) for b in biases]
+
+        self._feature_count = int(metadata["feature_count"])
+        self._label_count = int(metadata["label_count"])
+        self._one_hot_encoded = bool(metadata["one_hot_encoded"])
+
+        labels = metadata.get("labels")
+        self._labels = np.array(labels) if labels is not None else None
+
+        if not self._one_hot_encoded and self._labels is None:
+            raise ValueError("loaded model requires class labels but labels are missing in metadata")
+
+        self._build_computation_graph()
 
     
     def fit(self, X: np.ndarray, y: np.ndarray):
@@ -119,6 +219,9 @@ class FFNN:
             y (ndarray): training data labels
         '''
         
+        X = np.asarray(X)
+        y = np.asarray(y)
+
         # Set RNG
         rng = np.random.default_rng(seed=self._random_seed)
 
@@ -171,7 +274,7 @@ class FFNN:
         match self._optimizer:
             case "gd":
                 optimizer_factory = lambda w: GradientDescentOptimizer(w, self._learning_rate)
-            case "adam":
+            case "adams":
                 optimizer_factory = lambda w: AdamOptimizer(w, self._learning_rate, self._momentum_gain, self._rms_gain)
             case _:
                 raise ValueError("unknown optimizer stored in model")
@@ -180,64 +283,18 @@ class FFNN:
         bias_optimizers = [optimizer_factory(b.value) for b in self._bias]
 
         # Build computation graph
-        activations = (self._hidden_layer_activations or [])
-        activations.append(self._output_layer_activation)
-
-        layer_sizes = (self._hidden_layer_sizes or [])
-        layer_sizes.append(self._label_count)
-
-        self._bias_broadcasts: list[ADVBroadcastTo] = []
-        self._in_matrix = ADVMatrix()
-
-        A = ADVMatTrans(self._in_matrix)
-
-        for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
-            B_shape = (sz, self._batch_size)
-            
-            WA = ADVMatMul(W, A)
-            B = ADVBroadcastTo(b, B_shape)
-            Z = ADVMatAdd(WA, B)
-
-            self._bias_broadcasts.append(B)
-            
-            match fn:
-                case "linear":
-                    A = Z
-                case "relu":
-                    A = ADVReLU(Z)
-                case "sigmoid":
-                    A = ADVSigmoid(Z)
-                case "tanh":
-                    A = ADVTanh(Z)
-                case "softmax":
-                    T = ADVMatTrans(Z)
-                    S = ADVSoftmax(T)
-                    A = ADVMatTrans(S)
-                case _:
-                    raise ValueError("unknown activation function found in model")
-            
-        self._out_matrix = ADVMatTrans(A)
-        
-        match self._loss_function:
-            case "mse":
-                self._loss = ADVMeanSquaredError(self._out_matrix)
-            case "bce":
-                self._loss = ADVBinaryCrossEntropy(self._out_matrix)
-            case "cce":
-                self._loss = ADVCategoricalCrossEntropy(self._out_matrix)
-            case _:
-                raise ValueError("unknown loss function found in model")
+        self._build_computation_graph()
 
         # Scramble the training data
         needed_samples = self._batch_size * self._epochs
 
-        training_data = np.concatenate(X, y_ohe, axis=1)
+        training_data = np.concatenate((X, y_ohe), axis=1)
         training_order = rng.permutation(training_data)
 
         while training_order.shape[0] < needed_samples:
-            training_order = np.concatenate(training_order, rng.permutation(training_data))
+            training_order = np.concatenate((training_order, rng.permutation(training_data)), axis=0)
         
-        training_order = training_order[:needed_samples, :].reshape((self._batch_size, *training_data.shape))
+        training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
 
         # Train on every batch
         for batch in training_order:
@@ -264,7 +321,7 @@ class FFNN:
 
         sample_size = X.shape[0]
 
-        layer_sizes = (self._hidden_layer_sizes or [])
+        layer_sizes = list(self._hidden_layer_sizes or [])
         layer_sizes.append(self._label_count)
 
         for B, sz in zip(self._bias_broadcasts, layer_sizes):
