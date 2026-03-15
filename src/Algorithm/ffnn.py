@@ -384,6 +384,7 @@ class FFNN:
         self._biases_history = []
         self._weights_grad_history = []
         self._biases_grad_history = []
+        self._loss_history = []
 
         # Train on every batch
         for epoch_idx, batch in enumerate(training_order):
@@ -393,6 +394,8 @@ class FFNN:
             self._in_matrix.value = batch[:, :-self._label_count]
             self._loss.targets = batch[:, -self._label_count:]
             self._loss.calculate_value()
+
+            self._loss_history.append(self._loss.value)
 
             if self._verbose:
                 print(f"  Batch loss: {self._loss.value}")
@@ -496,4 +499,20 @@ class FFNN:
                 ax.set_ylabel('Frequency')
 
         anim = FuncAnimation(fig, animate, frames=len(self._weights_grad_history), interval=500, repeat=False)
+        plt.show()
+
+    def plot_loss(self):
+        '''
+        Plots the loss over epochs.
+        '''
+        if not hasattr(self, '_loss_history'):
+            raise ValueError("No training history available. Fit the model first.")
+
+        epochs = range(1, len(self._loss_history) + 1)
+        plt.figure(figsize=(10, 5))
+        plt.plot(epochs, self._loss_history)
+        plt.title('Loss Over Epochs')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.grid(True)
         plt.show()
