@@ -138,10 +138,17 @@ class FFNN:
         A = ADVMatTrans(self._in_matrix)
 
         for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
-            B_shape = (sz, self._batch_size) if self._batch_size else None
+            # B_shape is set dynamically per mini-batch in the training loop
 
+            # Old:
+            # B_shape = (sz, self._batch_size) if self._batch_size else None
+            # WA = ADVMatMul(W, A)
+            # B = ADVBroadcastTo(b, B_shape)
+            # Z = ADVMatAdd(WA, B)
+
+            # New:
             WA = ADVMatMul(W, A)
-            B = ADVBroadcastTo(b, B_shape)
+            B = ADVBroadcastTo(b, None)
             Z = ADVMatAdd(WA, B)
 
             self._bias_broadcasts.append(B)
@@ -278,17 +285,23 @@ class FFNN:
         return model
 
     
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray, X_val: np.ndarray | None = None, y_val: np.ndarray | None = None):
         '''
         Fits the model to the given training data
 
         Args:
             X (ndarray): training data features
             y (ndarray): training data labels
+            X_val (ndarray | None): validation data features (optional)
+            y_val (ndarray | None): validation data labels (optional)
         '''
         
         X = np.asarray(X)
         y = np.asarray(y)
+
+        if X_val is not None and y_val is not None:
+            X_val = np.asarray(X_val)
+            y_val = np.asarray(y_val)
 
         # Set RNG
         rng = np.random.default_rng(seed=self._random_seed)
@@ -301,9 +314,15 @@ class FFNN:
             self._labels = np.unique(y)
             self._label_count = len(self._labels)
             y_ohe = (y[:, None] == self._labels).astype(float)
+
+            if X_val is not None:
+                y_val_ohe = (y_val[:, None] == self._labels).astype(float)
         else:
             self._label_count = y.shape[1]
             y_ohe = y
+
+            if X_val is not None:
+                y_val_ohe = y_val
         
         # Find input layer size
         self._feature_count = X.shape[1]
@@ -366,19 +385,28 @@ class FFNN:
         if self._verbose:
             print("Computation graph built")
 
-        # Scramble the training data
-        needed_samples = self._batch_size * self._epochs
+        # Old:
+        # training_data = np.concatenate((X, y_ohe), axis=1)
+        # n_samples = training_data.shape[0]
+
+        # if self._verbose:
+        #     print(f"Training: {self._epochs} epochs, batch_size={self._batch_size}, n_samples={n_samples}")
+
+        
 
         training_data = np.concatenate((X, y_ohe), axis=1)
-        training_order = rng.permutation(training_data)
+        # Old:
+        # training_order = rng.permutation(training_data)
 
-        while training_order.shape[0] < needed_samples:
-            training_order = np.concatenate((training_order, rng.permutation(training_data)), axis=0)
+        #while training_order.shape[0] < needed_samples:
+        #    training_order = np.concatenate((training_order, rng.permutation(training_data)), axis=0)
         
-        training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
+        #training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
+        
+        n_samples = training_data.shape[0]
 
         if self._verbose:
-            print("Training data scrambled")
+            print(f"Training: {self._epochs} epochs, batch_size={self._batch_size}, n_samples={n_samples}")
 
         # Initialize history storage
         self._weights_history = []
@@ -386,35 +414,81 @@ class FFNN:
         self._weights_grad_history = []
         self._biases_grad_history = []
         self._loss_history = []
+        self._validation_loss_history = []
 
-        # Train on every batch
-        for epoch_idx, batch in enumerate(training_order):
+        # Train: each epoch = one full pass over the dataset, divided into mini-batches.
+        # Weights are updated after each mini-batch (standard mini-batch SGD).
+        # Loss recorded per epoch is the average loss over all mini-batches in that epoch.
+        for epoch_idx in range(self._epochs):
             if self._verbose:
                 print(f"Epoch {epoch_idx + 1}/{self._epochs}")
 
-            self._loss.clear_gradients()
-            
-            self._in_matrix.value = batch[:, :-self._label_count]
-            self._loss.targets = batch[:, -self._label_count:]
-            self._loss.calculate_value()
+            # Shuffle dataset at the start of each epoch
+            shuffled = rng.permutation(training_data)
 
-            self._loss_history.append(self._loss.value)
+            # Split into mini-batches; last batch may be smaller (drop if < 1 sample)
+            n_batches = max(1, n_samples // self._batch_size)
+            batches = np.array_split(shuffled, n_batches)
+
+            epoch_loss = 0.0
+            epoch_last_w_grad = None
+            epoch_last_b_grad = None
+
+            for batch in batches:
+                if len(batch) == 0:
+                    continue
+
+                # Dynamically update bias broadcast target shape for this batch size
+                actual_batch_size = len(batch)
+                layer_sizes = list(self._hidden_layer_sizes or [])
+                layer_sizes.append(self._label_count)
+                for B, sz in zip(self._bias_broadcasts, layer_sizes):
+                    B.target_shape = (sz, actual_batch_size)
+
+                # Forward pass
+                self._loss.clear_gradients()
+                self._in_matrix.value = batch[:, :-self._label_count]
+                self._loss.targets = batch[:, -self._label_count:]
+                self._loss.calculate_value()
+
+                epoch_loss += self._loss.value
+
+                # Backward pass
+                self._loss.calculate_backward_gradients()
+
+                # Weight update after each mini-batch
+                for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
+                    w.value = wo.optimize(w.gradient)
+                    b.value = bo.optimize(b.gradient)
+
+                epoch_last_w_grad = [w.gradient.copy() for w in self._weights]
+                epoch_last_b_grad = [b.gradient.copy() for b in self._bias]
+
+            avg_epoch_loss = epoch_loss / n_batches
+            self._loss_history.append(avg_epoch_loss)
+
+            # Calculate validation loss
+            if X_val is not None:
+                self._in_matrix.value = X_val
+                self._loss.targets = y_val_ohe
+
+                for B, sz in zip(self._bias_broadcasts, layer_sizes):
+                    B.target_shape = (sz, X_val.shape[0])
+
+                validation_loss = self._loss.calculate_value()
+                self._validation_loss_history.append(validation_loss)
 
             if self._verbose:
-                print(f"  Batch loss: {self._loss.value}")
-            
-            self._loss.calculate_backward_gradients()
+                print(f"  Epoch avg loss : {avg_epoch_loss:.6f}")
+                if validation_loss:
+                    print(f"  Validation loss: {validation_loss:.6f}")
 
-            for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
-                w.value = wo.optimize(w.gradient)
-                b.value = bo.optimize(b.gradient)
-            
-            # Store current weights, biases, and gradients after epoch
+            # Store snapshots after each epoch
             self._weights_history.append([w.value.copy() for w in self._weights])
             self._biases_history.append([b.value.copy() for b in self._bias])
-            self._weights_grad_history.append([w.gradient.copy() for w in self._weights])
-            self._biases_grad_history.append([b.gradient.copy() for b in self._bias])
-        
+            self._weights_grad_history.append(epoch_last_w_grad if epoch_last_w_grad else [np.zeros_like(w.value) for w in self._weights])
+            self._biases_grad_history.append(epoch_last_b_grad if epoch_last_b_grad else [np.zeros_like(b.value) for b in self._bias])
+
         if self._verbose:
             print("Training completed")
             
@@ -550,9 +624,12 @@ class FFNN:
 
         epochs = range(1, len(self._loss_history) + 1)
         plt.figure(figsize=(10, 5))
-        plt.plot(epochs, self._loss_history)
+        plt.plot(epochs, self._loss_history, label='Training Loss')
+        if hasattr(self, '_validation_loss_history') and len(self._validation_loss_history) > 0:
+            plt.plot(epochs, self._validation_loss_history, label='Validation Loss')
         plt.title('Loss Over Epochs')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
+        plt.legend()
         plt.grid(True)
         plt.show()
