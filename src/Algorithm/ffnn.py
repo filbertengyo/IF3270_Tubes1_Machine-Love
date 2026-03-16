@@ -285,17 +285,23 @@ class FFNN:
         return model
 
     
-    def fit(self, X: np.ndarray, y: np.ndarray):
+    def fit(self, X: np.ndarray, y: np.ndarray, X_val: np.ndarray | None = None, y_val: np.ndarray | None = None):
         '''
         Fits the model to the given training data
 
         Args:
             X (ndarray): training data features
             y (ndarray): training data labels
+            X_val (ndarray | None): validation data features (optional)
+            y_val (ndarray | None): validation data labels (optional)
         '''
         
         X = np.asarray(X)
         y = np.asarray(y)
+
+        if X_val is not None and y_val is not None:
+            X_val = np.asarray(X_val)
+            y_val = np.asarray(y_val)
 
         # Set RNG
         rng = np.random.default_rng(seed=self._random_seed)
@@ -308,9 +314,15 @@ class FFNN:
             self._labels = np.unique(y)
             self._label_count = len(self._labels)
             y_ohe = (y[:, None] == self._labels).astype(float)
+
+            if X_val is not None:
+                y_val_ohe = (y_val[:, None] == self._labels).astype(float)
         else:
             self._label_count = y.shape[1]
             y_ohe = y
+
+            if X_val is not None:
+                y_val_ohe = y_val
         
         # Find input layer size
         self._feature_count = X.shape[1]
@@ -402,6 +414,7 @@ class FFNN:
         self._weights_grad_history = []
         self._biases_grad_history = []
         self._loss_history = []
+        self._validation_loss_history = []
 
         # Train: each epoch = one full pass over the dataset, divided into mini-batches.
         # Weights are updated after each mini-batch (standard mini-batch SGD).
@@ -454,8 +467,21 @@ class FFNN:
             avg_epoch_loss = epoch_loss / n_batches
             self._loss_history.append(avg_epoch_loss)
 
+            # Calculate validation loss
+            if X_val is not None:
+                self._in_matrix.value = X_val
+                self._loss.targets = y_val_ohe
+
+                for B, sz in zip(self._bias_broadcasts, layer_sizes):
+                    B.target_shape = (sz, X_val.shape[0])
+
+                validation_loss = self._loss.calculate_value()
+                self._validation_loss_history.append(validation_loss)
+
             if self._verbose:
-                print(f"  Epoch avg loss: {avg_epoch_loss:.6f}")
+                print(f"  Epoch avg loss : {avg_epoch_loss:.6f}")
+                if validation_loss:
+                    print(f"  Validation loss: {validation_loss:.6f}")
 
             # Store snapshots after each epoch
             self._weights_history.append([w.value.copy() for w in self._weights])
@@ -598,9 +624,12 @@ class FFNN:
 
         epochs = range(1, len(self._loss_history) + 1)
         plt.figure(figsize=(10, 5))
-        plt.plot(epochs, self._loss_history)
+        plt.plot(epochs, self._loss_history, label='Training Loss')
+        if hasattr(self, '_validation_loss_history') and len(self._validation_loss_history) > 0:
+            plt.plot(epochs, self._validation_loss_history, label='Validation Loss')
         plt.title('Loss Over Epochs')
         plt.xlabel('Epoch')
         plt.ylabel('Loss')
+        plt.legend()
         plt.grid(True)
         plt.show()
