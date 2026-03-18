@@ -17,7 +17,7 @@ class FFNN:
             hidden_layer_activations: None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]] = None,
             output_layer_activation: Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"] = "linear",
             loss_function: Literal["mse", "bce", "cce"] = "mse",
-            weight_initialization: Literal["zero", "uniform", "normal"] = "zero",
+            weight_initialization: Literal["zero", "uniform", "normal", "xavier", "he"] = "zero",
             lower_bound: None | float = None,
             upper_bound: None | float = None,
             mean: None | float = None,
@@ -41,7 +41,7 @@ class FFNN:
             hidden_layer_activations (None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]]): array of string specifying activation function of each hidden layer\n
             output_layer_activation (Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]): string specifying activation function of output layer\n
             loss_function ("mse" | "bce" | "cce"): string specifying the loss function used for training\n
-            weight_initialization ("zero" | "uniform" | "normal"): string specifying the weight initialization method of the model\n
+            weight_initialization ("zero" | "uniform" | "normal" | "xavier" | "he"): string specifying the weight initialization method of the model\n
             lower_bound (None | float): lower bound of random weight when using uniform distribution\n
             upper_bound (None | float): upper bound of random weight when using uniform distribution\n
             mean (None | float): mean of random weights when using normal distribution\n
@@ -342,6 +342,10 @@ class FFNN:
                 weight_init_func = lambda shape: ADVMatrix(rng.uniform(low=self._lower_bound, high=self._upper_bound, size=shape))
             case "normal":
                 weight_init_func = lambda shape: ADVMatrix(rng.normal(loc=self._mean, scale=self._variance ** 0.5, size=shape))
+            case "xavier":
+                weight_init_func = lambda shape: ADVMatrix(rng.normal(loc=0, scale=(2 / (shape[1] + shape[0])) ** 0.5, size=shape))
+            case "he":
+                weight_init_func = lambda shape: ADVMatrix(rng.normal(loc=0, scale=(2 / shape[1]) ** 0.5, size=shape))
             case _:
                 raise ValueError("unknown weight initialization method stored in model")
 
