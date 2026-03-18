@@ -221,6 +221,23 @@ class FFNN:
             "labels": labels,
             "weight_count": len(weights),
             "bias_count": len(biases),
+            "loss_function": self._loss_function,
+            "weight_initialization": self._weight_initialization,
+            "lower_bound": self._lower_bound,
+            "upper_bound": self._upper_bound,
+            "mean": self._mean,
+            "variance": self._variance,
+            "random_seed": self._random_seed,
+            "batch_size": self._batch_size,
+            "epochs": self._epochs,
+            "optimizer": self._optimizer,
+            "learning_rate": self._learning_rate,
+            "momentum_gain": self._momentum_gain,
+            "rms_gain": self._rms_gain,
+            "l1_strength": self._l1_strength,
+            "l2_strength": self._l2_strength,
+            "rmsnorm": self._rmsnorm,
+            "verbose": self._verbose,
         }
     
         arrays: dict[str, np.ndarray] = {
@@ -239,6 +256,27 @@ class FFNN:
         for i, grad in enumerate(b_grads):
             arrays[f"b_grad_{i}"] = np.asarray(grad)
     
+        if self._rmsnorm:
+            for i, rms in enumerate(self._rms_weights):
+                arrays[f"rms_weight_{i}"] = np.asarray(rms.value)
+                arrays[f"rms_grad_{i}"] = np.asarray(rms.gradient)
+    
+        if hasattr(self, '_loss_history'):
+            epochs_trained = len(self._loss_history)
+            payload["epochs_trained"] = epochs_trained
+            arrays["loss_history"] = np.array(self._loss_history)
+            if hasattr(self, '_validation_loss_history') and len(self._validation_loss_history) > 0:
+                arrays["validation_loss_history"] = np.array(self._validation_loss_history)
+            for epoch in range(epochs_trained):
+                for layer_idx, w in enumerate(self._weights_history[epoch]):
+                    arrays[f"weights_history_{epoch}_{layer_idx}"] = np.asarray(w)
+                for layer_idx, b in enumerate(self._biases_history[epoch]):
+                    arrays[f"biases_history_{epoch}_{layer_idx}"] = np.asarray(b)
+                for layer_idx, wg in enumerate(self._weights_grad_history[epoch]):
+                    arrays[f"weights_grad_history_{epoch}_{layer_idx}"] = np.asarray(wg)
+                for layer_idx, bg in enumerate(self._biases_grad_history[epoch]):
+                    arrays[f"biases_history_{epoch}_{layer_idx}"] = np.asarray(bg)
+    
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
         
         np.savez(file_path, **arrays)
@@ -247,7 +285,7 @@ class FFNN:
     @classmethod
     def load(cls, file_path: str):
         '''
-        Saves the current model to a file
+        Loads a FFNN model from a file
 
         Args:
             file_path (str): path to the save file
@@ -268,10 +306,31 @@ class FFNN:
             b_grads = [data[f"b_grad_{i}"].copy() for i in range(bias_count)]
         
         hidden_layers = metadata["hidden_layers"]
-        hidden_layer_sizes = [l["size"] for l in hidden_layers]
-        hidden_layer_activations = [l["activation"] for l in hidden_layers]
+        hidden_layer_sizes = [l["size"] for l in hidden_layers] if hidden_layers else None
+        hidden_layer_activations = [l["activation"] for l in hidden_layers] if hidden_layers else None
 
-        model = cls(hidden_layer_sizes, hidden_layer_activations, metadata["final_activation"])
+        model = cls(
+            hidden_layer_sizes=hidden_layer_sizes,
+            hidden_layer_activations=hidden_layer_activations,
+            output_layer_activation=metadata["final_activation"],
+            loss_function=metadata["loss_function"],
+            weight_initialization=metadata["weight_initialization"],
+            lower_bound=metadata.get("lower_bound"),
+            upper_bound=metadata.get("upper_bound"),
+            mean=metadata.get("mean"),
+            variance=metadata.get("variance"),
+            random_seed=metadata["random_seed"],
+            batch_size=metadata["batch_size"],
+            epochs=metadata["epochs"],
+            optimizer=metadata["optimizer"],
+            learning_rate=metadata["learning_rate"],
+            momentum_gain=metadata.get("momentum_gain"),
+            rms_gain=metadata.get("rms_gain"),
+            l1_strength=metadata["l1_strength"],
+            l2_strength=metadata["l2_strength"],
+            rmsnorm=metadata["rmsnorm"],
+            verbose=metadata["verbose"],
+        )
 
         model._feature_count = int(metadata["feature_count"])
         model._label_count = int(metadata["label_count"])
@@ -292,7 +351,40 @@ class FFNN:
         for b, g in zip(model._bias, b_grads):
             b.gradient = g
 
+        if metadata.get("rmsnorm", False):
+            rms_weights = [data[f"rms_weight_{i}"].copy() for i in range(weight_count)]
+            rms_grads = [data[f"rms_grad_{i}"].copy() for i in range(weight_count)]
+            model._rms_weights = [ADVMatrix(r) for r in rms_weights]
+            for r, g in zip(model._rms_weights, rms_grads):
+                r.gradient = g
+
         model._build_computation_graph()
+
+        if metadata.get("epochs_trained", 0) > 0:
+            epochs_trained = metadata["epochs_trained"]
+            model._loss_history = data["loss_history"].tolist()
+            if "validation_loss_history" in data:
+                model._validation_loss_history = data["validation_loss_history"].tolist()
+            else:
+                model._validation_loss_history = []
+            model._weights_history = []
+            model._biases_history = []
+            model._weights_grad_history = []
+            model._biases_grad_history = []
+            for epoch in range(epochs_trained):
+                w_hist = []
+                b_hist = []
+                wg_hist = []
+                bg_hist = []
+                for layer in range(len(model._weights)):
+                    w_hist.append(data[f"weights_history_{epoch}_{layer}"].copy())
+                    b_hist.append(data[f"biases_history_{epoch}_{layer}"].copy())
+                    wg_hist.append(data[f"weights_grad_history_{epoch}_{layer}"].copy())
+                    bg_hist.append(data[f"biases_grad_history_{epoch}_{layer}"].copy())
+                model._weights_history.append(w_hist)
+                model._biases_history.append(b_hist)
+                model._weights_grad_history.append(wg_hist)
+                model._biases_grad_history.append(bg_hist)
 
         return model
 
