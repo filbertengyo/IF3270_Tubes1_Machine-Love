@@ -118,9 +118,17 @@ IF3270_Tubes1_Machine-Love/
 - Jupyter Notebook
 - Other dependencies listed in `requirements.txt`
 
-## Contributing
+## Contributions
 
-This is an academic project. For questions or improvements, please contact the repository maintainer.
+| Item | NIM |
+|---|---|
+| Notebook | 13523123, 13523161, 13523163 |
+| Activation Function | 13523161, 13523163 |
+| Save and Load | 13523123 |
+| Loss Function | 13523161 |
+| Verbose | 13523123 |
+| Optimizer | 13523161 |
+| Weight Initialization | 13523163 |
 
 ## License
 
