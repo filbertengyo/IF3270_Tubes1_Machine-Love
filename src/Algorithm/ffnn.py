@@ -382,7 +382,7 @@ class FFNN:
         
         # Initialize RMSNorm weights
         if self._rmsnorm:
-            self._rms_weights = [ADVMatrix(np.ones(size=sz)) for sz in [self._feature_count] + (self._hidden_layer_sizes or [])]
+            self._rms_weights = [ADVMatrix(np.ones(shape=(sz, 1))) for sz in [self._feature_count] + (self._hidden_layer_sizes or [])]
         
         # Initialize optimizers
         match self._optimizer:
@@ -441,7 +441,7 @@ class FFNN:
             epoch_last_w_grad = None
             epoch_last_b_grad = None
 
-            for batch in batches:
+            for batch_idx, batch in enumerate(batches):
                 if len(batch) == 0:
                     continue
 
@@ -449,6 +449,10 @@ class FFNN:
                 actual_batch_size = len(batch)
                 layer_sizes = list(self._hidden_layer_sizes or [])
                 layer_sizes.append(self._label_count)
+
+                if self._verbose:
+                    print(f"    Batch {batch_idx}/{len(batches) - 1}")
+                    print(f"        Batch Size: {actual_batch_size}")
                 
                 for B, sz in zip(self._bias_broadcasts, layer_sizes):
                     B.target_shape = (sz, actual_batch_size)
@@ -462,6 +466,9 @@ class FFNN:
                 self._in_matrix.value = batch[:, :-self._label_count]
                 self._loss.targets = batch[:, -self._label_count:]
                 self._loss.calculate_value()
+
+                if self._verbose:
+                    print(f"        Batch Loss: {self._loss.value}")
 
                 epoch_loss += self._loss.value
 
@@ -490,6 +497,10 @@ class FFNN:
 
                 for B, sz in zip(self._bias_broadcasts, layer_sizes):
                     B.target_shape = (sz, X_val.shape[0])
+                
+                if self._rmsnorm:
+                    for B, sz in zip(self._rmsnorm_broadcasts, [self._feature_count] + (self._hidden_layer_sizes or [])):
+                        B.target_shape = (sz, X_val.shape[0])
 
                 validation_loss = self._loss.calculate_value()
                 self._validation_loss_history.append(validation_loss)

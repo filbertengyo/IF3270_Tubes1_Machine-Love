@@ -523,7 +523,7 @@ class ADVSign(AutoDifferentiableValue):
 
 
 class ADVSoftPlus(AutoDifferentiableValue):
-    '''Auto Differentiable Sign Node'''
+    '''Auto Differentiable SoftPlus Node'''
 
     def __init__(self, inputs: AutoDifferentiableValue):
         super().__init__()
@@ -551,7 +551,7 @@ class ADVSoftPlus(AutoDifferentiableValue):
             self.inputs.clear_gradients()
             return
 
-        self.inputs.calculate_backward_gradients(_upstream / (1 + np.exp(-self.inputs)))
+        self.inputs.calculate_backward_gradients(_upstream / (1 + np.exp(-self.inputs.value)))
 
 
 class ADVMeanSquaredError(AutoDifferentiableValue):
