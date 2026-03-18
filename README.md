@@ -1,5 +1,7 @@
 # IF3270_Tubes1_Machine-Love
 
+![Banner](banner.jpeg)
+
 ## Description
 
 This repository implements a custom Feedforward Neural Network (FFNN) from scratch in Python, including automatic differentiation, various optimization algorithms, and regularization techniques. It is developed as part of the IF3270 (Artificial Intelligence) course assignment at Institut Teknologi Bandung.
