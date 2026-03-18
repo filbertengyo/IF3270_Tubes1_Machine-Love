@@ -129,6 +129,7 @@ IF3270_Tubes1_Machine-Love/
 | Verbose | 13523123 |
 | Optimizer | 13523161 |
 | Weight Initialization | 13523163 |
+| Report | 13523123, 13523161, 13523163 |
 
 ## License
 
