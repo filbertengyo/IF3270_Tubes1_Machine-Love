@@ -14,8 +14,8 @@ class FFNN:
     def __init__(
             self,
             hidden_layer_sizes: None | list[int] = None,
-            hidden_layer_activations: None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax"]] = None,
-            output_layer_activation: Literal["linear", "relu", "sigmoid", "tanh", "softmax"] = "linear",
+            hidden_layer_activations: None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]] = None,
+            output_layer_activation: Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"] = "linear",
             loss_function: Literal["mse", "bce", "cce"] = "mse",
             weight_initialization: Literal["zero", "uniform", "normal"] = "zero",
             lower_bound: None | float = None,
@@ -38,8 +38,8 @@ class FFNN:
 
         Args:
             hidden_layer_sizes (list[int]): array of integers specifying how many perceptrons are in each hidden layer\n
-            hidden_layer_activations (None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax"]]): array of string specifying activation function of each hidden layer\n
-            output_layer_activation (Literal["linear", "relu", "sigmoid", "tanh", "softmax"]): string specifying activation function of output layer\n
+            hidden_layer_activations (None | list[Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]]): array of string specifying activation function of each hidden layer\n
+            output_layer_activation (Literal["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]): string specifying activation function of output layer\n
             loss_function ("mse" | "bce" | "cce"): string specifying the loss function used for training\n
             weight_initialization ("zero" | "uniform" | "normal"): string specifying the weight initialization method of the model\n
             lower_bound (None | float): lower bound of random weight when using uniform distribution\n
@@ -67,12 +67,12 @@ class FFNN:
         self._hidden_layer_count = len(hidden_layer_sizes) if hidden_layer_sizes is not None else None
         self._hidden_layer_sizes = hidden_layer_sizes
 
-        if hidden_layer_activations and any(activation not in ["linear", "relu", "sigmoid", "tanh", "softmax"] for activation in hidden_layer_activations):
+        if hidden_layer_activations and any(activation not in ["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"] for activation in hidden_layer_activations):
             raise ValueError("unknown activation function in hidden layers")
         
         self._hidden_layer_activations = hidden_layer_activations
 
-        if (output_layer_activation not in ["linear", "relu", "sigmoid", "tanh", "softmax"]):
+        if (output_layer_activation not in ["linear", "relu", "sigmoid", "tanh", "softmax", "sign", "softplus"]):
             raise ValueError("unknown output layer activation function")
 
         self._output_layer_activation = output_layer_activation
@@ -166,6 +166,10 @@ class FFNN:
                     T = ADVMatTrans(Z)
                     S = ADVSoftmax(T)
                     A = ADVMatTrans(S)
+                case "sign":
+                    A = ADVSign(Z)
+                case "softplus":
+                    A = ADVSoftPlus(Z)
                 case _:
                     raise ValueError("unknown activation function found in model")
 

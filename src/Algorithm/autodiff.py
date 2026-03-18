@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+﻿from abc import ABC, abstractmethod
 import numpy as np
 
 class AutoDifferentiableValue(ABC):
@@ -488,6 +488,70 @@ class ADVSoftmax(AutoDifferentiableValue):
         local_grad = self.value * (_upstream - sum_term)
         
         self.logits.calculate_backward_gradients(local_grad)
+
+
+class ADVSign(AutoDifferentiableValue):
+    '''Auto Differentiable Sign Node'''
+
+    def __init__(self, inputs: AutoDifferentiableValue):
+        super().__init__()
+        self.inputs = inputs
+
+    def clear_gradients(self):
+        self.gradient = None
+        self.inputs.clear_gradients()
+    
+    def calculate_value(self) -> None | np.ndarray | float:
+        inputs = self.inputs.calculate_value()
+
+        if inputs is None:
+            self.value = None
+            return None
+
+        self.value = np.sign(inputs)
+        
+        return self.value
+    
+    def calculate_backward_gradients(self, _upstream = None):
+        _upstream = super().calculate_backward_gradients(_upstream)
+
+        if self.inputs.value is None:
+            self.inputs.clear_gradients()
+            return
+
+        self.inputs.calculate_backward_gradients(np.zeros_like(_upstream))
+
+
+class ADVSoftPlus(AutoDifferentiableValue):
+    '''Auto Differentiable Sign Node'''
+
+    def __init__(self, inputs: AutoDifferentiableValue):
+        super().__init__()
+        self.inputs = inputs
+
+    def clear_gradients(self):
+        self.gradient = None
+        self.inputs.clear_gradients()
+    
+    def calculate_value(self) -> None | np.ndarray | float:
+        inputs = self.inputs.calculate_value()
+
+        if inputs is None:
+            self.value = None
+            return None
+
+        self.value = np.log(1 + np.exp(inputs))
+        
+        return self.value
+    
+    def calculate_backward_gradients(self, _upstream = None):
+        _upstream = super().calculate_backward_gradients(_upstream)
+
+        if self.inputs.value is None:
+            self.inputs.clear_gradients()
+            return
+
+        self.inputs.calculate_backward_gradients(_upstream / (1 + np.exp(-self.inputs)))
 
 
 class ADVMeanSquaredError(AutoDifferentiableValue):
