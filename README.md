@@ -4,7 +4,7 @@
 
 ## Description
 
-This repository implements a custom Feedforward Neural Network (FFNN) from scratch in Python, including automatic differentiation, various optimization algorithms, and regularization techniques. It is developed as part of the IF3270 (Artificial Intelligence) course assignment at Institut Teknologi Bandung.
+This repository implements a custom Feedforward Neural Network (FFNN) from scratch in Python, including automatic differentiation, various optimization algorithms, and regularization techniques. It is developed as part of the IF3270 (Machine Learning) course assignment at Institut Teknologi Bandung.
 
 The project demonstrates core machine learning concepts such as backpropagation, gradient descent, and neural network training, without relying on high-level libraries like TensorFlow or PyTorch for the core implementation.
 
