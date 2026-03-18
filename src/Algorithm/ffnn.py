@@ -31,6 +31,7 @@ class FFNN:
             rms_gain: None | float = None,
             l1_strength: float = 0,
             l2_strength: float = 0,
+            rmsnorm: bool = False,
             verbose: bool = False,
         ):
         '''
@@ -55,6 +56,7 @@ class FFNN:
             rms_gain (None | float): value of beta 2 parameter when using adams optimizer\n
             l1_strength (float): strength of L1 regularization during model training\n
             l2_strength (float): strength of L2 regularization during model training\n
+            rmsnorm (bool): whether the model uses rmsnorm regularization\n
             verbose (bool): whether the model should log its progress during training or fitting\n
         '''
 
@@ -82,7 +84,7 @@ class FFNN:
 
         self._loss_function = loss_function
 
-        if (weight_initialization not in ["zero", "uniform", "normal"]):
+        if (weight_initialization not in ["zero", "uniform", "normal", "xavier", "he"]):
             raise ValueError("unknown weight initialization method")
 
         self._weight_initialization = weight_initialization
@@ -122,6 +124,8 @@ class FFNN:
         self._l1_strength = l1_strength
         self._l2_strength = l2_strength
 
+        self._rmsnorm = rmsnorm
+
         self._verbose = verbose
 
 
@@ -133,20 +137,24 @@ class FFNN:
         layer_sizes.append(self._label_count)
 
         self._bias_broadcasts: list[ADVBroadcastTo] = []
+
+        if self._rmsnorm:
+            self._rmsnorm_broadcasts: list[ADVBroadcastTo] = []
+
         self._in_matrix = ADVMatrix()
 
         A = ADVMatTrans(self._in_matrix)
 
-        for fn, sz, W, b in zip(activations, layer_sizes, self._weights, self._bias):
-            # B_shape is set dynamically per mini-batch in the training loop
+        for i, (fn, W, b) in enumerate(zip(activations, self._weights, self._bias)):
+            if self._rmsnorm:
+                Wr = ADVBroadcastTo(self._rms_weights[i])
+                WrT = ADVMatTrans(Wr)
+                A = ADVMatTrans(A)
+                A = ADVRMSNorm(A, WrT)
+                A = ADVMatTrans(A)
 
-            # Old:
-            # B_shape = (sz, self._batch_size) if self._batch_size else None
-            # WA = ADVMatMul(W, A)
-            # B = ADVBroadcastTo(b, B_shape)
-            # Z = ADVMatAdd(WA, B)
+                self._rmsnorm_broadcasts.append(Wr)
 
-            # New:
             WA = ADVMatMul(W, A)
             B = ADVBroadcastTo(b, None)
             Z = ADVMatAdd(WA, B)
@@ -372,6 +380,10 @@ class FFNN:
             total_params = sum(w.value.size for w in self._weights) + sum(b.value.size for b in self._bias)
             print(f"Weights and biases initialized with {total_params} parameters")
         
+        # Initialize RMSNorm weights
+        if self._rmsnorm:
+            self._rms_weights = [ADVMatrix(np.ones(size=sz)) for sz in [self._feature_count] + (self._hidden_layer_sizes or [])]
+        
         # Initialize optimizers
         match self._optimizer:
             case "gd":
@@ -384,6 +396,9 @@ class FFNN:
         weight_optimizers = [optimizer_factory(w.value) for w in self._weights]
         bias_optimizers = [optimizer_factory(b.value) for b in self._bias]
 
+        if self._rmsnorm:
+            rmsnorm_optimizers = [optimizer_factory(r.value) for r in self._rms_weights]
+
         if self._verbose:
             print("Optimizers initialized")
 
@@ -393,23 +408,7 @@ class FFNN:
         if self._verbose:
             print("Computation graph built")
 
-        # Old:
-        # training_data = np.concatenate((X, y_ohe), axis=1)
-        # n_samples = training_data.shape[0]
-
-        # if self._verbose:
-        #     print(f"Training: {self._epochs} epochs, batch_size={self._batch_size}, n_samples={n_samples}")
-
-        
-
         training_data = np.concatenate((X, y_ohe), axis=1)
-        # Old:
-        # training_order = rng.permutation(training_data)
-
-        #while training_order.shape[0] < needed_samples:
-        #    training_order = np.concatenate((training_order, rng.permutation(training_data)), axis=0)
-        
-        #training_order = training_order[:needed_samples, :].reshape((self._epochs, self._batch_size, training_data.shape[1]))
         
         n_samples = training_data.shape[0]
 
@@ -450,8 +449,13 @@ class FFNN:
                 actual_batch_size = len(batch)
                 layer_sizes = list(self._hidden_layer_sizes or [])
                 layer_sizes.append(self._label_count)
+                
                 for B, sz in zip(self._bias_broadcasts, layer_sizes):
                     B.target_shape = (sz, actual_batch_size)
+                
+                if self._rmsnorm:
+                    for B, sz in zip(self._rmsnorm_broadcasts, [self._feature_count] + (self._hidden_layer_sizes or [])):
+                        B.target_shape = (sz, actual_batch_size)
 
                 # Forward pass
                 self._loss.clear_gradients()
@@ -465,9 +469,13 @@ class FFNN:
                 self._loss.calculate_backward_gradients()
 
                 # Weight update after each mini-batch
-                for w, b, wo, bo in zip(self._weights, self._bias, weight_optimizers, bias_optimizers):
+                for i, (w, b, wo, bo) in enumerate(zip(self._weights, self._bias, weight_optimizers, bias_optimizers)):
                     w.value = wo.optimize(w.gradient)
                     b.value = bo.optimize(b.gradient)
+
+                    if self._rmsnorm:
+                        r = self._rms_weights[i]
+                        r.value = rmsnorm_optimizers[i].optimize(r.gradient)
 
                 epoch_last_w_grad = [w.gradient.copy() for w in self._weights]
                 epoch_last_b_grad = [b.gradient.copy() for b in self._bias]
@@ -519,6 +527,10 @@ class FFNN:
 
         for B, sz in zip(self._bias_broadcasts, layer_sizes):
             B.target_shape = (sz, sample_size)
+        
+        if self._rmsnorm:
+            for B, sz in zip(self._rmsnorm_broadcasts, [self._feature_count] + (self._hidden_layer_sizes or [])):
+                B.target_shape = (sz, sample_size)
         
         self._in_matrix.value = X
         y_pred_ohe = self._out_matrix.calculate_value()

@@ -675,3 +675,49 @@ class ADVCategoricalCrossEntropy(AutoDifferentiableValue):
         local_grad = -(self.targets / safe_preds) / batch_size
         self.predictions.calculate_backward_gradients(local_grad * _upstream)
 
+
+class ADVRMSNorm(AutoDifferentiableValue):
+    '''Auto Differentiable RMSNorm Node'''
+
+    EPSILON = 1e-8
+
+    def __init__(self, inputs: AutoDifferentiableValue, weights: AutoDifferentiableValue):
+        super().__init__()
+        self.inputs = inputs
+        self.weights = weights
+        self._rms = None
+        self._norm = None
+    
+    def clear_gradients(self):
+        self.gradient = None
+        self.inputs.clear_gradients()
+        self.weights.clear_gradients()
+    
+    def calculate_value(self) -> None | np.ndarray | float:
+        inputs = self.inputs.calculate_value()
+        weights = self.weights.calculate_value()
+
+        if inputs is None or weights is None:
+            self.value = None
+            return None
+
+        self._rms = np.sqrt(np.mean(inputs ** 2, axis=1, keepdims=True) + self.EPSILON)
+        self._norm = inputs / self._rms
+        self.value = self._norm * weights
+        
+        return self.value
+    
+    def calculate_backward_gradients(self, _upstream = None):
+        _upstream = super().calculate_backward_gradients(_upstream)
+
+        if self.value is None:
+            self.inputs.clear_gradients()
+            self.weights.clear_gradients()
+            return
+        
+        norm_grad = _upstream * self.weights.value
+        mean_term = np.mean(self._norm * norm_grad, axis=1, keepdims=True)
+        inputs_grad = (norm_grad - self._norm * mean_term) / self._rms
+        
+        self.inputs.calculate_backward_gradients(inputs_grad)
+        self.weights.calculate_backward_gradients(_upstream * self._norm)
